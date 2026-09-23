@@ -39,3 +39,9 @@ def test_imagem_vai_como_anexo():
     import numpy as np
     p = build_payload(_report(image=np.zeros((4, 4, 3), np.uint8)), "", {"mythic"}, datetime.now())
     assert p["embeds"][0]["image"]["url"] == "attachment://item.png"
+
+
+def test_avisa_quando_e_novo_no_catalogo():
+    r = LootReport("Coral", 1, "common", 1, 1, "", 0, "1m 00s", None, first_in_catalog=True)
+    p = build_payload(r, "", {"mythic"}, datetime.now())
+    assert "catálogo" in p["embeds"][0]["description"]

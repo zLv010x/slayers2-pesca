@@ -50,7 +50,7 @@ class App(ctk.CTk):
         self.session = Session(log_dir=config.LOG_DIR)
         self.compass = CompassLock()
         self.compass.load(COMPASS_FILE)
-        self.catalog = Catalog(config.CATALOG_DIR)
+        self.catalog = Catalog(config.CATALOG_DIR, config.CATALOG_LOCAL_DIR)
         self._posted: queue.SimpleQueue = queue.SimpleQueue()
         self.notifier = DiscordNotifier(on_error=lambda m: self.post(lambda: self.set_status(f"Discord: {m}")))
         self.apply_discord()

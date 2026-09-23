@@ -27,10 +27,14 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
 - Registra tudo em `logs/macro.log` e salva um print em `logs/evidencias/` quando algo dá errado.
 - Não deixa o PC dormir nem a tela apagar enquanto está pescando.
 - Guarda tudo o que pegou em `logs/sessao-*.csv`.
-- Monta um **catálogo** em `catalogo/`: uma imagem de cada item (sem repetir) e o índice
-  `catalogo/itens.json`. A macro usa o catálogo para corrigir erros de leitura do nome e
-  confirmar a raridade. Se algum nome estiver errado, corrija o `"name"` no `itens.json`
-  e coloque a leitura errada em `"aliases"`.
+- Usa um **catálogo de itens** para saber se um item já é conhecido, corrigir erros de leitura
+  do nome e confirmar a raridade:
+  - `catalogo/` é o catálogo **compartilhado**, que vem junto com a macro. Ela só lê essa pasta.
+  - `catalogo_local/` é o **seu**: itens que ainda não estão no compartilhado entram aqui
+    (uma imagem por item, sem repetir), junto com as suas contagens.
+  - Item que não está em nenhum dos dois aparece no Discord como "Primeira vez no catálogo".
+  - Para mandar os itens novos para o compartilhado: `python src/catalog.py publicar`.
+  - Se um nome entrar errado, corrija o `"name"` no `itens.json` e ponha a leitura errada em `"aliases"`.
 
 ## Atalhos
 

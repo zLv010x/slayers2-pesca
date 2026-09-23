@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.json"
 CALIBRATION_DIR = ROOT / "calibracao"
 LOG_DIR = ROOT / "logs"
-CATALOG_DIR = ROOT / "catalogo"
+CATALOG_DIR = ROOT / "catalogo"              # compartilhado (vai para o GitHub)
+CATALOG_LOCAL_DIR = ROOT / "catalogo_local"  # só deste PC
 
 # Área do painel da party (canto esquerdo): nunca clicar ali.
 PARTY_ZONE = {"x0": 0.0, "x1": 0.14, "y0": 0.40, "y1": 0.60}

@@ -314,11 +314,13 @@ class Fisher:
     def _report(self, item: loot_mod.Loot, img: np.ndarray) -> loot_mod.Loot:
         """Passa o item pelo catálogo (nome/raridade certos), registra e avisa. Devolve o item corrigido."""
         snap = loot_mod.item_snapshot(img, item)
+        first_in_catalog = False
         if self.catalog is not None:
             rec = self.catalog.record(item.name, item.rarity, snap)
             if rec.corrected:
                 log.info("Nome corrigido pelo catálogo: %r -> %r", item.name, rec.name)
             if rec.first_time:
+                first_in_catalog = True
                 log.info("Item novo no catálogo: %s", rec.name)
             if rec.rarity != item.rarity:
                 log.info("Raridade pelo catálogo: %s (cor lida: %s)", rec.rarity, item.rarity)
@@ -339,6 +341,7 @@ class Fisher:
             elapsed=self.session.elapsed_text(),
             image=snap if d.get("send_image", True) else None,
             is_new=item.is_new,
+            first_in_catalog=first_in_catalog,
         ))
         return item
 

@@ -6,3 +6,4 @@ config.json
 config.json.*
 calibracao/
 logs/
+catalogo_local/

@@ -1,12 +1,16 @@
-"""Catálogo de itens: uma imagem por item e um índice (catalogo/itens.json).
+"""Catálogo de itens em duas camadas.
 
-Serve para a macro reconhecer melhor os itens:
-- corrige erros do OCR comparando com os nomes já conhecidos ("Corai" -> "Coral");
-- usa a raridade mais vista daquele item em vez de confiar só na cor da vez;
-- avisa quando um item aparece pela primeira vez.
+- catalogo/        compartilhado (vai para o GitHub). A macro só LÊ essa pasta.
+- catalogo_local/  deste PC (fora do git). Itens que ainda não estão no
+                   compartilhado entram aqui, com imagem; e as contagens pessoais.
 
-Dá para editar o itens.json à mão (ex.: corrigir um nome): o que estiver em
-"aliases" passa a ser lido como o nome certo.
+Cada item tem uma imagem só (a da primeira vez) e uma entrada no itens.json.
+A macro usa o catálogo para:
+- saber se o item já é conhecido (se não for, é "primeiro no catálogo");
+- corrigir erros do OCR comparando com os nomes conhecidos ("Golden Fisn" -> "Golden Fish");
+- usar a raridade mais vista daquele item em vez de confiar só na cor da vez.
+
+`python src/catalog.py publicar` junta o catalogo_local no compartilhado.
 """
 from __future__ import annotations
 
@@ -14,6 +18,8 @@ import difflib
 import json
 import os
 import re
+import shutil
+import sys
 import threading
 from collections import Counter
 from dataclasses import dataclass
@@ -28,6 +34,7 @@ IMAGES_DIR = "imagens"
 # Nomes curtos erram fácil ("Ore" x "Core"): só corrige nomes com tamanho mínimo.
 FUZZY_MIN_LEN = 6
 FUZZY_CUTOFF = 0.88
+SHARED_FIELDS = ("name", "slug", "image", "rarity", "rarity_votes", "aliases")
 
 
 def normalize(name: str) -> str:
@@ -42,97 +49,151 @@ def slugify(name: str) -> str:
 class Recorded:
     name: str          # nome certo (canônico)
     rarity: str        # raridade mais vista desse item
-    first_time: bool   # primeira vez que o catálogo vê esse item
+    first_time: bool   # item que não estava em nenhum catálogo
     corrected: bool    # o nome lido foi corrigido
 
 
+def _load_index(path: Path) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        path.replace(path.with_suffix(".json.bak"))
+        return {}
+    return {normalize(e["name"]): e for e in data.get("items", []) if isinstance(e, dict) and e.get("name")}
+
+
+def _save_index(path: Path, items: dict[str, dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(items.values(), key=lambda e: e["name"].lower())
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"items": ordered}, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _new_entry(name: str) -> dict:
+    return {"name": name, "slug": slugify(name), "image": None, "rarity": None,
+            "rarity_votes": {}, "aliases": []}
+
+
 class Catalog:
-    def __init__(self, folder: Path) -> None:
-        self.folder = Path(folder)
-        self.index_path = self.folder / INDEX_NAME
+    def __init__(self, shared_dir: Path, local_dir: Path | None = None) -> None:
+        self.shared_dir = Path(shared_dir)
+        self.local_dir = Path(local_dir) if local_dir else self.shared_dir.with_name(self.shared_dir.name + "_local")
         self._lock = threading.Lock()
-        self.items: dict[str, dict] = {}
-        self._load()
+        self.shared = _load_index(self.shared_dir / INDEX_NAME)
+        self.local = _load_index(self.local_dir / INDEX_NAME)
 
-    # ------------------------------------------------------------ disco
-    def _load(self) -> None:
-        if not self.index_path.exists():
-            return
-        try:
-            data = json.loads(self.index_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            self.index_path.replace(self.index_path.with_suffix(".json.bak"))
-            return
-        for entry in data.get("items", []):
-            if isinstance(entry, dict) and entry.get("name"):
-                self.items[normalize(entry["name"])] = entry
+    # ------------------------------------------------------------ consulta
+    def knows(self, name: str) -> bool:
+        """O item (ou uma leitura parecida) já está em algum catálogo?"""
+        with self._lock:
+            return self._find(name)[0] is not None
 
-    def save(self) -> None:
-        self.folder.mkdir(parents=True, exist_ok=True)
-        ordered = sorted(self.items.values(), key=lambda e: e["name"].lower())
-        tmp = self.index_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"items": ordered}, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self.index_path)
+    def _entries(self) -> dict[str, dict]:
+        return {**self.local, **self.shared}
 
-    # ------------------------------------------------------------ busca
-    def _find(self, name: str) -> tuple[dict | None, bool]:
-        """Entrada do catálogo para esse nome lido; bool = foi por aproximação."""
+    def _find(self, name: str) -> tuple[str | None, bool]:
+        """Chave do item para esse nome lido; bool = achou por aproximação."""
         key = normalize(name)
         if not key:
             return None, False
-        if key in self.items:
-            return self.items[key], False
-        for entry in self.items.values():
+        entries = self._entries()
+        if key in entries:
+            return key, False
+        for k, entry in entries.items():
             if key in {normalize(a) for a in entry.get("aliases", [])}:
-                return entry, False
+                return k, False
         if len(key) >= FUZZY_MIN_LEN:
-            close = difflib.get_close_matches(key, list(self.items), n=1, cutoff=FUZZY_CUTOFF)
+            close = difflib.get_close_matches(key, list(entries), n=1, cutoff=FUZZY_CUTOFF)
             if close:
-                return self.items[close[0]], True
+                return close[0], True
         return None, False
+
+    def _canonical(self, key: str) -> dict:
+        return self.shared.get(key) or self.local[key]
+
+    def _votes(self, key: str) -> Counter:
+        return (Counter(self.shared.get(key, {}).get("rarity_votes", {}))
+                + Counter(self.local.get(key, {}).get("rarity_votes", {})))
 
     def resolve(self, name: str) -> str:
         """Nome certo para o que o OCR leu (ou o próprio nome, se for desconhecido)."""
         with self._lock:
-            entry, _ = self._find(name)
-            return entry["name"] if entry else name
+            key, _ = self._find(name)
+            return self._canonical(key)["name"] if key else name
 
-    # ------------------------------------------------------------ registro
+    # ------------------------------------------------------------ registro (só no local)
     def record(self, name: str, rarity: str, snapshot: np.ndarray | None,
                when: datetime | None = None) -> Recorded:
         when_iso = (when or datetime.now()).isoformat(timespec="seconds")
         with self._lock:
-            entry, fuzzy = self._find(name)
-            first_time = entry is None
-            if entry is None:
-                entry = {
-                    "name": name,
-                    "slug": slugify(name),
-                    "image": None,
-                    "rarity": rarity,
-                    "rarity_votes": {},
-                    "aliases": [],
-                    "count": 0,
-                    "first_seen": when_iso,
-                    "last_seen": when_iso,
-                }
-                self.items[normalize(name)] = entry
-            elif normalize(name) != normalize(entry["name"]) and name not in entry["aliases"]:
-                entry["aliases"].append(name)
-            votes = Counter(entry.get("rarity_votes", {}))
+            key, fuzzy = self._find(name)
+            first_time = key is None
+            if key is None:
+                key = normalize(name)
+            canonical_name = self._canonical(key)["name"] if not first_time else name
+            local = self.local.setdefault(key, _new_entry(canonical_name))
+            local.setdefault("count", 0)
+            local.setdefault("first_seen", when_iso)
+            if normalize(name) != key and name not in local["aliases"] and not self._is_known_alias(key, name):
+                local["aliases"].append(name)
+            votes = Counter(local.get("rarity_votes", {}))
             votes[rarity] += 1
-            entry["rarity_votes"] = dict(votes)
-            entry["rarity"] = votes.most_common(1)[0][0]
-            entry["count"] = int(entry.get("count", 0)) + 1
-            entry["last_seen"] = when_iso
-            if not entry.get("image") and snapshot is not None:
-                entry["image"] = self._save_image(entry["slug"], snapshot)
-            self.save()
-            corrected = fuzzy or normalize(name) != normalize(entry["name"])
-            return Recorded(entry["name"], entry["rarity"], first_time, corrected)
+            local["rarity_votes"] = dict(votes)
+            local["count"] += 1
+            local["last_seen"] = when_iso
+            in_shared_with_image = bool(self.shared.get(key, {}).get("image"))
+            if not in_shared_with_image and not local.get("image") and snapshot is not None:
+                local["image"] = self._save_image(self.local_dir, local["slug"], snapshot)
+            best = self._votes(key).most_common(1)[0][0]
+            local["rarity"] = best
+            _save_index(self.local_dir / INDEX_NAME, self.local)
+            corrected = fuzzy or normalize(name) != key
+            return Recorded(canonical_name, best, first_time, corrected)
 
-    def _save_image(self, slug: str, snapshot: np.ndarray) -> str | None:
-        folder = self.folder / IMAGES_DIR
-        folder.mkdir(parents=True, exist_ok=True)
+    def _is_known_alias(self, key: str, name: str) -> bool:
+        return name in self.shared.get(key, {}).get("aliases", [])
+
+    @staticmethod
+    def _save_image(folder: Path, slug: str, snapshot: np.ndarray) -> str | None:
+        (folder / IMAGES_DIR).mkdir(parents=True, exist_ok=True)
         rel = f"{IMAGES_DIR}/{slug}.png"
-        return rel if cv2.imwrite(str(self.folder / rel), snapshot) else None
+        return rel if cv2.imwrite(str(folder / rel), snapshot) else None
+
+    # ------------------------------------------------------------ publicar
+    def publish(self) -> list[str]:
+        """Junta o catálogo local no compartilhado. Devolve os itens novos no compartilhado."""
+        added: list[str] = []
+        with self._lock:
+            for key, local in self.local.items():
+                shared = self.shared.get(key)
+                if shared is None:
+                    shared = {f: local.get(f) for f in SHARED_FIELDS}
+                    shared["rarity_votes"], shared["aliases"], shared["image"] = {}, [], None
+                    self.shared[key] = shared
+                    added.append(local["name"])
+                votes = Counter(shared.get("rarity_votes", {})) + Counter(local.get("rarity_votes", {}))
+                shared["rarity_votes"] = dict(votes)
+                shared["rarity"] = votes.most_common(1)[0][0] if votes else shared.get("rarity")
+                shared["aliases"] = sorted(set(shared.get("aliases", [])) | set(local.get("aliases", [])))
+                if not shared.get("image") and local.get("image"):
+                    src = self.local_dir / local["image"]
+                    if src.exists():
+                        (self.shared_dir / IMAGES_DIR).mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, self.shared_dir / local["image"])
+                        shared["image"] = local["image"]
+                # o que foi publicado sai do local (senão contaria em dobro); ficam as contagens
+                local["rarity_votes"], local["aliases"] = {}, []
+            _save_index(self.shared_dir / INDEX_NAME, self.shared)
+            _save_index(self.local_dir / INDEX_NAME, self.local)
+        return added
+
+
+if __name__ == "__main__":
+    root = Path(__file__).resolve().parent.parent
+    if sys.argv[1:] != ["publicar"]:
+        sys.exit("uso: python src/catalog.py publicar")
+    new = Catalog(root / "catalogo", root / "catalogo_local").publish()
+    print(f"{len(new)} item(ns) novo(s) no catálogo compartilhado: {', '.join(new) or '-'}")

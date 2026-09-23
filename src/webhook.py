@@ -60,7 +60,8 @@ class LootReport:
     tracked_total: int      # total desse item na sessão
     elapsed: str            # tempo de macro rodando, ex.: "1h 05m"
     image: np.ndarray | None
-    is_new: bool = False    # primeira vez na coleção
+    is_new: bool = False    # primeira vez na coleção (selo NEW! do jogo)
+    first_in_catalog: bool = False  # item que o catálogo da macro ainda não conhecia
 
 
 def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], when: datetime) -> dict:
@@ -79,8 +80,13 @@ def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], whe
         "fields": fields,
         "timestamp": when.astimezone(timezone.utc).isoformat(),
     }
+    notes = []
     if report.is_new:
-        embed["description"] = "Item novo na coleção!"
+        notes.append("Item novo na coleção!")
+    if report.first_in_catalog:
+        notes.append("📖 Primeira vez no catálogo da macro.")
+    if notes:
+        embed["description"] = "\n".join(notes)
     if report.image is not None:
         embed["image"] = {"url": "attachment://item.png"}
     payload = {"embeds": [embed], "allowed_mentions": {"parse": []}}
