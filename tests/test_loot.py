@@ -77,3 +77,18 @@ def test_selo_new_conta_como_um_e_marca_item_novo(shot):
     assert loot is not None
     assert (loot.name, loot.quantity, loot.is_new) == ("Golden Fish", 1, True)
     assert loot.rarity == "rare"  # o amarelo do selo não pode virar "legendary"
+
+
+def test_nome_curto_com_quantidade_ao_lado_coral(shot):
+    # Bug real: com nome curto o "x1" fica centralizado na faixa, à direita do texto.
+    loot = read_popup(shot("popup_coral.webp"))
+    assert loot is not None
+    assert (loot.name, loot.quantity) == ("Coral", 1)
+
+
+def test_limpa_sujeira_do_ocr_no_nome():
+    from loot import clean_name
+    assert clean_name("'Zebra Fish") == "Zebra Fish"
+    assert clean_name("- Coral .") == "Coral"
+    assert clean_name("Black Dragon Armour") == "Black Dragon Armour"
+    assert clean_name("!!") == ""

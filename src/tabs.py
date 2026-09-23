@@ -102,6 +102,8 @@ class SessionTab:
         self.show_recent.pack(side="right")
         ctk.CTkButton(head, text="Abrir logs", width=90, height=24, fg_color="#374151",
                       command=app.open_logs).pack(side="right", padx=8)
+        ctk.CTkButton(head, text="Zerar", width=60, height=24, fg_color="#374151",
+                      command=app.new_session).pack(side="right")
         if app.cfg["ui"].get("show_recent", True):
             self.show_recent.select()
         self.recent = ctk.CTkScrollableFrame(parent, fg_color=CARD, corner_radius=10, height=170)
@@ -137,6 +139,11 @@ class SessionTab:
             ctk.CTkLabel(line, text=f"{name}  x{qty}", anchor="w").pack(side="left", padx=4)
             ctk.CTkLabel(line, text=hora, text_color=MUTED).pack(side="right", padx=4)
             self._rows.append(line)
+
+    def reset(self) -> None:
+        self._shown = -1
+        self.last_img.configure(image=None, text="Nada ainda — boa pescaria!", text_color=("gray10", "gray90"))
+        self.refresh()
 
     def show_last(self, image, text: str) -> None:
         self.last_img.configure(image=image, text=text, compound="left")

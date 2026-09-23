@@ -26,6 +26,9 @@ DIGIT_FIX = str.maketrans({"l": "1", "I": "1", "o": "0", "O": "0"})
 # Altura para ampliar o recorte do "xN" antes do OCR.
 QTY_OCR_HEIGHT = 200
 MIN_NAME_LEN = 2
+# Quantas alturas de letra o "xN" pode estar para o lado do nome.
+QTY_SIDE_REACH = 4
+NAME_EDGE_JUNK = re.compile(r"^[^\w(]+|[^\w)!?]+$")
 # Texto dos avisos é branco; ampliar 2x ajuda a ler o "xN" pequeno.
 WHITE_TEXT_MIN = 200
 OCR_UPSCALE = 2
@@ -103,7 +106,8 @@ def _band(frame: np.ndarray, x: int, y: int, w: int, h: int, top_only: bool = Fa
 def _read_quantity(frame: np.ndarray, x: int, y: int, w: int, h: int) -> int | None:
     """O "xN" é pequeno: relê só a área logo abaixo do nome, ampliada."""
     fh, fw = frame.shape[:2]
-    crop = frame[max(0, y - h):min(fh, y + 3 * h), max(0, x - h):min(fw, x + w + h)]
+    reach = QTY_SIDE_REACH * h
+    crop = frame[max(0, y - h):min(fh, y + 3 * h), max(0, x - reach):min(fw, x + w + reach)]
     if crop.size == 0:
         return None
     lines = ocr.read_lines(_white_text(crop), min_height=QTY_OCR_HEIGHT)
@@ -134,14 +138,26 @@ def has_new_badge(frame: np.ndarray, x: int, y: int, w: int, h: int) -> bool:
     return float(yellow.mean()) >= NEW_MIN_FRAC
 
 
+def clean_name(text: str) -> str:
+    """Tira sujeira que o OCR põe nas pontas ("'Zebra Fish" -> "Zebra Fish")."""
+    return NAME_EDGE_JUNK.sub("", text).strip()
+
+
 def _qty_below(line: ocr.Line, lines: list[ocr.Line]) -> int | None:
+    """Acha o "xN" logo abaixo do nome.
+
+    O "xN" fica centralizado na faixa do aviso, não no texto: com nome curto
+    ("Coral") ele aparece à DIREITA do nome, então aceitamos um pouco para o lado.
+    """
+    left = line.x - QTY_SIDE_REACH * line.h
+    right = line.x + line.w + QTY_SIDE_REACH * line.h
     for other in lines:
         qty = _parse_qty(other.text)
         if qty is None:
             continue
         below = line.y + line.h // 2 < other.y <= line.y + 3 * line.h
-        overlaps = other.x < line.x + line.w and other.x + other.w > line.x
-        if below and overlaps:
+        beside = other.x < right and other.x + other.w > left
+        if below and beside:
             return qty
     return None
 
@@ -155,7 +171,7 @@ def read_popups(frame: np.ndarray) -> list[Loot]:
     lines = ocr.read_lines(_white_text(region), min_height=OCR_UPSCALE * region.shape[0])
     found: list[Loot] = []
     for line in lines:
-        name = line.text.strip()
+        name = clean_name(line.text)
         if len(name) < MIN_NAME_LEN or _parse_qty(name) is not None:
             continue
         x, y = line.x + rx0, line.y + ry0

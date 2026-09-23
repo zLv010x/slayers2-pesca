@@ -202,7 +202,7 @@ class App(ctk.CTk):
     def _refresh_stats(self) -> None:
         s = self.session
         tracked = self.cfg["discord"].get("tracked_item", "").strip()
-        self.stat_labels["Tempo"].configure(text=s.elapsed_text() if self._running or s.catches else "-")
+        self.stat_labels["Tempo"].configure(text=s.elapsed_text() if s.elapsed_seconds() >= 1 else "-")
         self.stat_labels["Itens"].configure(text=str(s.catches))
         self._tracked_title.configure(text=tracked or "Item")
         self.stat_labels["tracked"].configure(text=str(s.total_of(tracked)) if tracked else "-")
@@ -223,6 +223,7 @@ class App(ctk.CTk):
         self._save_now()
         self._stop = threading.Event()
         self._running = True
+        self.session.start()
         self._render_running()
         cb = Callbacks(status=lambda m: self.post(lambda: self.set_status(m)),
                        loot=lambda items, snap: self.post(lambda: self._on_loot(items, snap)))
@@ -240,8 +241,19 @@ class App(ctk.CTk):
         config.LOG_DIR.mkdir(parents=True, exist_ok=True)
         os.startfile(config.LOG_DIR)
 
+    def new_session(self) -> None:
+        """Zera tempo e contagens (o CSV da sessão anterior continua salvo em logs/)."""
+        if self._running:
+            self.set_status("Pare a pesca antes de zerar a sessão.")
+            return
+        self.session = Session(log_dir=config.LOG_DIR)
+        self.session_tab.reset()
+        self._refresh_stats()
+        self.set_status("Sessão zerada.")
+
     def _on_stopped(self, reason: str) -> None:
         self._running = False
+        self.session.pause()
         self._render_running()
         self.set_status(reason)
         self._refresh_stats()

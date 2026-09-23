@@ -19,16 +19,35 @@ def format_elapsed(seconds: float) -> str:
 @dataclass
 class Session:
     log_dir: Path | None = None
-    started: float = field(default_factory=time.monotonic)
     counts: Counter = field(default_factory=Counter)      # nome -> quantidade somada
     rarities: Counter = field(default_factory=Counter)    # raridade -> nº de drops
     catches: int = 0                                       # nº de drops (cada coleta = 1)
     misses: int = 0                                        # minigames perdidos / sem aviso
     last: list[tuple[str, str, int, str]] = field(default_factory=list)  # (hora, nome, qtd, raridade)
     _csv_path: Path | None = None
+    _active_sec: float = 0.0            # tempo pescando nas rodadas anteriores
+    _run_start: float | None = None     # início da rodada atual (None = parado)
+
+    @property
+    def running(self) -> bool:
+        return self._run_start is not None
+
+    def start(self) -> None:
+        if self._run_start is None:
+            self._run_start = time.monotonic()
+
+    def pause(self) -> None:
+        if self._run_start is not None:
+            self._active_sec += time.monotonic() - self._run_start
+            self._run_start = None
+
+    def elapsed_seconds(self) -> float:
+        """Só o tempo em que a macro estava pescando (parado não conta)."""
+        current = time.monotonic() - self._run_start if self._run_start is not None else 0.0
+        return self._active_sec + current
 
     def elapsed_text(self) -> str:
-        return format_elapsed(time.monotonic() - self.started)
+        return format_elapsed(self.elapsed_seconds())
 
     def total_of(self, name: str) -> int:
         key = name.strip().lower()

@@ -313,6 +313,7 @@ class Fisher:
 
     def _report(self, item: loot_mod.Loot, img: np.ndarray) -> None:
         self.session.record(item.name, item.quantity, item.rarity)
+        logbook.save_item(loot_mod.item_snapshot(img, item), item.name)
         d = self.cfg["discord"]
         tracked = str(d.get("tracked_item", "")).strip()
         self.notifier.send_loot(LootReport(
