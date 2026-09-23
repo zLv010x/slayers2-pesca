@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.pytest_cache/
+# Tem o link do webhook (senha) e dados pessoais: nunca versionar.
+config.json
+config.json.*
+calibracao/
+logs/
