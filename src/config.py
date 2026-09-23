@@ -39,10 +39,13 @@ DEFAULTS: dict = {
         "popup_wait_sec": 3.0,
         "after_collect_sec": 0.5,
         "rod_equip_wait_sec": 0.8,
+        "recovery_wait_sec": 30.0,
+        "refocus_after_sec": 15.0,
     },
     "limits": {
         "rod_retries": 3,
         "max_failed_casts": 5,
+        "max_recoveries": 10,
     },
     "tracking": {
         "task_fps": 30.0,

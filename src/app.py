@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import queue
 import threading
 from typing import Callable
@@ -12,6 +13,7 @@ import keyboard
 from PIL import Image
 
 import config
+import logbook
 import screen
 import window
 from compass import CompassLock
@@ -73,7 +75,7 @@ class App(ctk.CTk):
         head.pack(fill="x", padx=14, pady=(12, 4))
         ctk.CTkLabel(head, text="Slayers 2  •  Pesca", font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
         self.pill = ctk.CTkLabel(head, text="Parado", corner_radius=12, fg_color=IDLE,
-                                 height=26, width=90, font=ctk.CTkFont(size=12, weight="bold"))
+                                 height=26, width=110, font=ctk.CTkFont(size=12, weight="bold"))
         self.pill.pack(side="right")
 
         self.start_btn = ctk.CTkButton(self, height=52, corner_radius=12, font=ctk.CTkFont(size=18, weight="bold"),
@@ -170,8 +172,12 @@ class App(ctk.CTk):
     def set_status(self, text: str) -> None:
         self.status.configure(text=text)
         if self._running:
-            paused = text.startswith("Pausado")
-            self.pill.configure(text="Pausado" if paused else "Pescando", fg_color=AMBER if paused else GREEN)
+            for prefix, label in (("Pausado", "Pausado"), ("Recuperando", "Recuperando")):
+                if text.startswith(prefix):
+                    self.pill.configure(text=label, fg_color=AMBER)
+                    break
+            else:
+                self.pill.configure(text="Pescando", fg_color=GREEN)
 
     def post(self, fn: Callable[[], None]) -> None:
         """Agenda uma função para rodar na thread da interface."""
@@ -180,7 +186,11 @@ class App(ctk.CTk):
     def _pump(self) -> None:
         try:
             while True:
-                self._posted.get_nowait()()
+                fn = self._posted.get_nowait()
+                try:
+                    fn()
+                except Exception:  # um erro na tela nunca pode derrubar a macro
+                    logbook.get().exception("Erro ao atualizar a interface")
         except queue.Empty:
             pass
         self.after(PUMP_MS, self._pump)
@@ -225,6 +235,10 @@ class App(ctk.CTk):
         except Exception as exc:  # erro inesperado: mostra em vez de fechar em silêncio
             reason = f"Erro inesperado: {exc}"
         self.post(lambda: self._on_stopped(reason))
+
+    def open_logs(self) -> None:
+        config.LOG_DIR.mkdir(parents=True, exist_ok=True)
+        os.startfile(config.LOG_DIR)
 
     def _on_stopped(self, reason: str) -> None:
         self._running = False
@@ -378,8 +392,11 @@ class App(ctk.CTk):
 
 
 def main() -> None:
+    log = logbook.setup(config.LOG_DIR)
+    log.info("Macro aberta.")
     window.ensure_dpi_awareness()
     App().mainloop()
+    log.info("Macro fechada.")
 
 
 if __name__ == "__main__":

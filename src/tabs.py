@@ -34,10 +34,14 @@ ADVANCED_FIELDS = {
         ("popup_wait_sec", "Esperar aviso do item (s)", "Tempo extra procurando o nome do item."),
         ("after_collect_sec", "Espera após coletar (s)", "Pausa antes do próximo lançamento."),
         ("rod_equip_wait_sec", "Espera ao equipar vara (s)", "Depois de apertar a tecla da vara."),
+        ("recovery_wait_sec", "Espera ao recuperar (s)", "Depois de um problema, espera isso e tenta de novo."),
+        ("refocus_after_sec", "Trazer Roblox de volta após (s)",
+         "Se outra janela ficar na frente, traz o jogo de volta depois disso. 0 = nunca."),
     ],
     "limits": [
         ("rod_retries", "Tentativas de equipar vara", "Se não equipar depois disso, para e avisa."),
-        ("max_failed_casts", "Lançamentos sem peixe seguidos", "Passou disso, para e avisa (caiu na água?)."),
+        ("max_failed_casts", "Lançamentos sem peixe seguidos", "Passou disso, conta como problema (caiu na água?)."),
+        ("max_recoveries", "Problemas seguidos até desistir", "Recuperações seguidas sem pegar peixe antes de parar."),
     ],
     "tracking": [
         ("task_fps", "FPS do minigame", "Prints por segundo no minigame. Baixe se o PC travar."),
@@ -96,6 +100,8 @@ class SessionTab:
         ctk.CTkLabel(head, text="Histórico", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left", padx=4)
         self.show_recent = ctk.CTkSwitch(head, text="mostrar", command=self._toggle_recent)
         self.show_recent.pack(side="right")
+        ctk.CTkButton(head, text="Abrir logs", width=90, height=24, fg_color="#374151",
+                      command=app.open_logs).pack(side="right", padx=8)
         if app.cfg["ui"].get("show_recent", True):
             self.show_recent.select()
         self.recent = ctk.CTkScrollableFrame(parent, fg_color=CARD, corner_radius=10, height=170)

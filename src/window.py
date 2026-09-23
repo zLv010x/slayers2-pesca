@@ -16,6 +16,9 @@ kernel32 = ctypes.windll.kernel32
 ROBLOX_EXE = "robloxplayerbeta.exe"
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 SW_RESTORE = 9
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+ES_DISPLAY_REQUIRED = 0x00000002
 MIN_CLIENT_PX = 200
 
 _EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -79,6 +82,12 @@ def client_rect(hwnd: int) -> Rect | None:
     if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
         return None
     return Rect(pt.x, pt.y, w, h)
+
+
+def keep_awake(on: bool) -> None:
+    """Impede o PC de dormir e a tela de apagar enquanto a macro roda (tela apagada = macro cega)."""
+    flags = ES_CONTINUOUS | (ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED if on else 0)
+    kernel32.SetThreadExecutionState(flags)
 
 
 def is_foreground(hwnd: int) -> bool:

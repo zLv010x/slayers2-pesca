@@ -4,7 +4,9 @@ Regras de segurança:
 - Só clica/aperta teclas com o Roblox em primeiro plano (senão pausa e espera).
 - Confere a vara na hotbar antes de lançar e aperta a tecla UMA vez por tentativa.
 - Confere a bússola antes de lançar: câmera girada = pausa, não lança torto.
-- Muitos lançamentos seguidos sem minigame = para e avisa (personagem caiu, etc.).
+- Muitos lançamentos seguidos sem minigame = avisa, espera e tenta de novo.
+- Qualquer problema vira "recuperação" (log + print + Discord + espera) em vez de
+  parar: a ideia é rodar a noite toda. Só para de vez depois de muitas falhas seguidas.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from typing import Callable
 import numpy as np
 
 import hotbar
+import logbook
 import loot as loot_mod
 import screen
 import window
@@ -31,10 +34,21 @@ START_HITS = 2
 RELEASE_AFTER_LOST_SEC = 0.3
 POPUP_POLL_SEC = 0.25
 FOREGROUND_POLL_SEC = 0.5
+STATS_EVERY_CYCLES = 10
+
+log = logbook.get()
 
 
 class StopRun(Exception):
     """Pedido de parada (F1) ou problema que exige parar a macro."""
+
+
+class Recoverable(Exception):
+    """Algo deu errado neste ciclo; dá para esperar e tentar de novo."""
+
+    def __init__(self, msg: str, img: np.ndarray | None = None) -> None:
+        super().__init__(msg)
+        self.img = img
 
 
 @dataclass
@@ -67,6 +81,17 @@ class Fisher:
         self.hwnd: int | None = None
         self._stop = threading.Event()
         self.failed_casts = 0
+        self.recoveries = 0
+        self.cycles = 0
+        self._last_status = ""
+        self._status_cb = cb.status
+        cb.status = self._status
+
+    def _status(self, msg: str) -> None:
+        if msg != self._last_status:
+            log.info(msg)
+            self._last_status = msg
+        self._status_cb(msg)
 
     # ---------- utilidades ----------
     def t(self, key: str) -> float:
@@ -82,15 +107,13 @@ class Fisher:
             self._check_stop()
             time.sleep(min(0.02, max(0.0, end - time.perf_counter())))
 
-    def _problem(self, msg: str) -> None:
-        """Para a macro e avisa no Discord."""
+    def _notify(self, text: str, ping: bool = True) -> None:
         if self.cfg["discord"].get("notify_problems", True):
-            self.notifier.send_text(f"⚠️ Macro parou: {msg}", ping=True)
-        raise StopRun(msg)
+            self.notifier.send_text(text, ping=ping)
 
     def rect(self) -> window.Rect:
         """Área do jogo agora. Espera (pausado) enquanto o Roblox não estiver na frente."""
-        warned = False
+        warned, since = False, 0.0
         while True:
             self._check_stop()
             if not self.hwnd or window.client_rect(self.hwnd) is None:
@@ -103,10 +126,16 @@ class Fisher:
                     if warned:
                         self.cb.status("Roblox de volta, continuando...")
                     return r
-            elif not warned:
-                self.mouse.release()
-                self.cb.status("Pausado: o Roblox não está na frente. Clique no jogo para continuar.")
-                warned = True
+            else:
+                if not warned:
+                    self.mouse.release()
+                    self.cb.status("Pausado: o Roblox não está na frente. Clique no jogo para continuar.")
+                    warned, since = True, time.perf_counter()
+                refocus = self.t("refocus_after_sec")
+                if refocus > 0 and time.perf_counter() - since >= refocus:
+                    log.warning("Roblox fora da frente há %.0fs: trazendo de volta.", refocus)
+                    window.focus(self.hwnd)
+                    since = time.perf_counter()
             time.sleep(FOREGROUND_POLL_SEC)
 
     def frame(self) -> tuple[window.Rect, np.ndarray]:
@@ -121,28 +150,41 @@ class Fisher:
     def ensure_rod(self) -> None:
         key = str(self.cfg["rod_key"]).strip().lower()
         retries = int(self.cfg["limits"]["rod_retries"])
+        img = None
         for attempt in range(retries + 1):
             _, img = self.frame()
-            if hotbar.check_rod(img).equipped:
+            check = hotbar.check_rod(img)
+            log.debug("Vara: equipada=%s (disco %.0f, fundo %.0f)",
+                      check.equipped, check.inner_gray, check.outer_gray)
+            if check.equipped:
                 return
             if not key or attempt == retries:
                 break
             self.cb.status(f"Vara fora da mão: apertando {key.upper()} ({attempt + 1}/{retries})...")
             screen.tap_key(key)
             self.sleep(self.t("rod_equip_wait_sec"))
-        self._problem(f"não consegui equipar a vara (tecla {key.upper() or '?'}).")
+        raise Recoverable(f"não consegui equipar a vara (tecla {key.upper() or '?'})", img)
 
     def check_camera(self) -> None:
         if not self.cfg.get("compass_lock", True) or not self.compass.ready:
             return
         tol = int(self.cfg.get("compass_tolerance_px", 6))
+        paused_at, notified = None, False
         while True:
             _, img = self.frame()
             drift = self.compass.drift_px(img)
             if drift is not None and abs(drift) <= tol:
+                if paused_at is not None:
+                    log.info("Câmera voltou para a posição (desvio %+dpx).", drift)
                 return
             msg = "bússola não encontrada" if drift is None else f"câmera girou {drift:+d}px"
-            self.cb.status(f"Pausado: {msg}. Volte a câmera para a posição marcada (ou remarque com F2).")
+            if paused_at is None:
+                paused_at = time.perf_counter()
+                logbook.save_evidence(img, "camera " + msg)
+            elif not notified and time.perf_counter() - paused_at >= self.t("recovery_wait_sec"):
+                self._notify(f"⏸️ Pesca pausada: {msg}. Arrume a câmera no jogo para continuar.")
+                notified = True
+            self.cb.status(f"Pausado: {msg}. Volte a câmera para a posição marcada (ou remarque o ponto).")
             self.sleep(1.0)
 
     def cast(self) -> None:
@@ -150,6 +192,7 @@ class Fisher:
         r = self.rect()
         x, y = self.to_screen(r, pt["x"], pt["y"])
         self.cb.status("Lançando...")
+        log.debug("Clique de lançamento em (%d, %d) na janela %dx%d", x, y, r.w, r.h)
         screen.click_at(x, y)
         self.sleep(self.t("after_cast_sec"))
 
@@ -197,15 +240,20 @@ class Fisher:
                             near = (game.ball_x, game.ball_y)
                             self.tracker.start(game.ball_y, game.zone_y, game.ball_h, now)
                             end_deadline = now + self.t("minigame_max_sec")
+                            waited = now - (start_deadline - self.t("minigame_start_timeout_sec"))
+                            log.info("Peixe mordeu após %.1fs (quadrado %dpx)", waited, game.ball_h)
                             self.cb.status("Minigame!")
                     else:
                         hits = 1 if game is not None else 0
                     last_game = game
                     if not started and now >= start_deadline:
+                        logbook.save_evidence(self.grabber.grab(r), "sem minigame")
                         return False
                 else:
                     if game is None:
                         if now - last_seen > lost_sec:
+                            log.info("Minigame terminou (%.1fs)",
+                                     now - (end_deadline - self.t("minigame_max_sec")))
                             return True
                         if now - last_seen > RELEASE_AFTER_LOST_SEC:
                             self.mouse.set(False)
@@ -214,6 +262,7 @@ class Fisher:
                         self.tracker.observe(game.ball_y, game.ball_h, game.zone_top, game.zone_y, now)
                         self.mouse.set(bool(self.tracker.decide(now)))
                     if now >= end_deadline:
+                        log.warning("Minigame passou do tempo máximo: indo coletar mesmo assim.")
                         return True
                 leftover = frame_budget - (time.perf_counter() - t0)
                 if leftover > 0:
@@ -246,10 +295,17 @@ class Fisher:
             screen.release_key("t")
         if not fresh:
             fresh, img = self._poll_new(before, time.perf_counter() + self.t("popup_wait_sec"))
+        if before:
+            log.debug("Avisos antigos ainda na tela: %s", [f"{i.name} x{i.quantity}" for i in before])
         for item in fresh:
+            log.info("Pegou: %s x%d [%s]%s", item.name, item.quantity, item.rarity,
+                     " NOVO" if item.is_new else "")
             self._report(item, img)
         if not fresh:
             self.session.record_miss()
+            log.warning("Nenhum aviso de item depois do T (drop perdido ou aviso não lido).")
+            _, shot = self.frame()
+            logbook.save_evidence(shot, "sem aviso de item")
         snap = loot_mod.item_snapshot(img, fresh[-1]) if fresh else None
         self.cb.loot(fresh, snap)
         self.sleep(self.t("after_collect_sec"))
@@ -274,6 +330,8 @@ class Fisher:
 
     # ---------- laço ----------
     def one_cycle(self) -> None:
+        self.cycles += 1
+        log.debug("---- ciclo %d ----", self.cycles)
         self.ensure_rod()
         self.check_camera()
         self.cast()
@@ -282,10 +340,45 @@ class Fisher:
             limit = int(self.cfg["limits"]["max_failed_casts"])
             self.cb.status(f"Nenhum peixe mordeu ({self.failed_casts}/{limit}). Tentando de novo...")
             if self.failed_casts >= limit:
-                self._problem(f"{limit} lançamentos seguidos sem minigame (caiu na água? vara presa?).")
+                self.failed_casts = 0
+                _, img = self.frame()
+                raise Recoverable(f"{limit} lançamentos seguidos sem minigame (caiu na água? vara presa?)", img)
             return
         self.failed_casts = 0
+        self.recoveries = 0
         self.collect()
+        if self.cycles % STATS_EVERY_CYCLES == 0:
+            self._log_stats()
+
+    def _log_stats(self) -> None:
+        s = self.session
+        log.info("Resumo: %s rodando, %d ciclos, %d itens, %d perdidos, %d recuperações seguidas",
+                 s.elapsed_text(), self.cycles, s.catches, s.misses, self.recoveries)
+
+    def _recover(self, msg: str, img: np.ndarray | None) -> None:
+        """Registra o problema, avisa, espera e deixa o laço tentar de novo."""
+        self.mouse.release()
+        screen.release_key("t")
+        self.recoveries += 1
+        limit = int(self.cfg["limits"]["max_recoveries"])
+        logbook.save_evidence(img, msg)
+        if self.recoveries > limit:
+            log.error("Desistindo depois de %d recuperações seguidas: %s", limit, msg)
+            self._notify(f"🛑 Macro parou depois de {limit} tentativas de recuperação: {msg}")
+            raise StopRun(f"Parei: {msg} ({limit} tentativas sem sucesso).")
+        wait = self.t("recovery_wait_sec")
+        log.error("Recuperação %d/%d: %s. Tentando de novo em %.0fs.", self.recoveries, limit, msg, wait)
+        self._notify(f"⚠️ {msg}. Tentando de novo em {wait:.0f}s ({self.recoveries}/{limit}).",
+                     ping=self.recoveries == 1)
+        self.cb.status(f"Recuperando ({self.recoveries}/{limit}): {msg}. Nova tentativa em {wait:.0f}s.")
+        self.sleep(wait)
+
+    def _safe_shot(self) -> np.ndarray | None:
+        try:
+            return self.grabber.grab(window.client_rect(self.hwnd)) if self.hwnd else None
+        except Exception:
+            log.exception("Também não consegui tirar print")
+            return None
 
     def run(self, stop: threading.Event) -> str:
         """Roda até parar. Devolve o motivo da parada."""
@@ -296,13 +389,30 @@ class Fisher:
         if self.hwnd is None:
             return "Roblox não encontrado. Abra o jogo."
         window.focus(self.hwnd)
+        window.keep_awake(True)
         self.grabber = screen.Grabber()
+        log.info("==== Início: janela %s, ponto %s, área %s, trava bússola=%s ====",
+                 window.client_rect(self.hwnd), self.cfg["cast_point"], self.cfg["scan_area"],
+                 bool(self.cfg.get("compass_lock")) and self.compass.ready)
+        reason = "Parado."
         try:
             while True:
-                self.one_cycle()
+                try:
+                    self.one_cycle()
+                except Recoverable as exc:
+                    self._recover(str(exc), exc.img)
+                except StopRun:
+                    raise
+                except Exception as exc:  # bug inesperado: registra tudo e segue pescando
+                    log.exception("Erro inesperado no ciclo %d", self.cycles)
+                    self._recover(f"erro inesperado ({type(exc).__name__}: {exc})", self._safe_shot())
         except StopRun as exc:
-            return str(exc) or "Parado."
+            reason = str(exc) or "Parado."
+            return reason
         finally:
+            window.keep_awake(False)
+            log.info("==== Fim: %s ====", reason)
+            self._log_stats()
             self.mouse.release()
             screen.release_key("t")
             self.grabber.close()
