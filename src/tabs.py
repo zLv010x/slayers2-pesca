@@ -30,7 +30,10 @@ ADVANCED_FIELDS = {
         ("minigame_max_sec", "Duração máx. do minigame (s)", "Segurança: depois disso vai coletar."),
         ("ball_lost_sec", "Minigame acabou após (s)", "Quadrado branco sumido por esse tempo = acabou."),
         ("after_minigame_sec", "Espera antes do T (s)", "Pausa entre o fim do minigame e segurar T."),
-        ("collect_hold_sec", "Segurar T por (s)", "Quanto tempo segura T para pegar o item."),
+        ("collect_hold_sec", "Segurar T por (s)", "Quanto tempo o jogo pede para segurar T."),
+        ("collect_timeout_sec", "Tentar pegar da vara por (s)",
+         "Se o item balança e o T recomeça, continua tentando até esse tempo."),
+        ("ground_pickup_sec", "Tentar pegar do chão por (s)", "Depois de guardar a vara, tenta pegar do chão."),
         ("popup_wait_sec", "Esperar aviso do item (s)", "Tempo extra procurando o nome do item."),
         ("after_collect_sec", "Espera após coletar (s)", "Pausa antes do próximo lançamento."),
         ("rod_equip_wait_sec", "Espera ao equipar vara (s)", "Depois de apertar a tecla da vara."),
@@ -185,6 +188,12 @@ class SetupTab:
         self.rod.pack(side="left", padx=8)
         self.rod.bind("<KeyRelease>", lambda _e: self._save_rod())
         hint(box, "A macro confere a hotbar antes de lançar e só aperta a tecla se a vara não estiver na mão.")
+        r = row(box)
+        self.ground = ctk.CTkSwitch(r, text="Se o item não vier, guardar a vara e pegar do chão",
+                                    command=self._save_ground)
+        self.ground.pack(side="left")
+        if cfg.get("ground_pickup", True):
+            self.ground.select()
 
         box = section(scroll, "Atalhos")
         labels = {"start_stop": "Iniciar / parar", "set_cast_point": "Marcar ponto", "exit": "Fechar macro"}
@@ -217,6 +226,10 @@ class SetupTab:
 
     def _save_lock(self) -> None:
         self.app.cfg["compass_lock"] = bool(self.lock.get())
+        self.app.save_soon()
+
+    def _save_ground(self) -> None:
+        self.app.cfg["ground_pickup"] = bool(self.ground.get())
         self.app.save_soon()
 
     def _save_rod(self) -> None:

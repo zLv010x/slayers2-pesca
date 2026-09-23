@@ -20,6 +20,7 @@ import numpy as np
 import hotbar
 import logbook
 import loot as loot_mod
+import prompt as prompt_mod
 import screen
 import window
 from bar_control import TrackController
@@ -34,6 +35,13 @@ SEARCH_PAD_Y, SEARCH_PAD_Y_MIN = 0.125, 24
 START_HITS = 2
 RELEASE_AFTER_LOST_SEC = 0.3
 POPUP_POLL_SEC = 0.25
+COLLECT_POLL_SEC = 0.05
+# Aviso de coleta sumido por mais que isso = o jogo zerou o progresso do T.
+# (um ou dois quadros sem achar o aviso não soltam o T à toa)
+PROMPT_LOST_SEC = 0.25
+# Se o aviso nunca aparecer nesse tempo, segura T "no escuro" (como a versão antiga).
+PROMPT_GRACE_SEC = 1.0
+HOLD_SLACK_SEC = 1.5
 FOREGROUND_POLL_SEC = 0.5
 STATS_EVERY_CYCLES = 10
 
@@ -285,19 +293,72 @@ class Fisher:
             self.sleep(POPUP_POLL_SEC)
         return [], None
 
+    def _hold_t(self, before: list[loot_mod.Loot], budget: float, where: str
+                ) -> tuple[list[loot_mod.Loot], np.ndarray | None]:
+        """Segura T acompanhando o aviso de coleta do jogo.
+
+        Se o item balança, o aviso some e volta, e o jogo zera o progresso: então
+        solta o T quando o aviso some e aperta de novo quando ele volta. Se o aviso
+        nunca for detectado, segura "no escuro" (como antes) para não travar.
+        """
+        hold_need = self.t("collect_hold_sec")
+        start = time.perf_counter()
+        deadline = start + budget
+        holding, hold_since, last_seen, seen_any, restarts = False, 0.0, -1.0, False, 0
+        self.cb.status(f"Segurando T para pegar ({where})...")
+        try:
+            while time.perf_counter() < deadline:
+                _, img = self.frame()
+                fresh = loot_mod.new_items(before, loot_mod.read_popups(img))
+                if fresh:
+                    if restarts:
+                        log.info("Item pego %s depois de %d recomeço(s) do T.", where, restarts)
+                    return fresh, img
+                now = time.perf_counter()
+                if prompt_mod.find_collect_prompt(img) is not None:
+                    seen_any, last_seen = True, now
+                prompt_on = seen_any and now - last_seen <= PROMPT_LOST_SEC
+                blind = not seen_any and now - start >= PROMPT_GRACE_SEC
+                want = prompt_on or blind
+                if holding and (not want or now - hold_since > hold_need + HOLD_SLACK_SEC):
+                    # aviso sumiu (jogo zerou o progresso) ou segurou tempo demais sem vir nada
+                    screen.release_key("t")
+                    holding = False
+                    restarts += 1
+                    log.debug("T solto %s (aviso na tela=%s, segurando há %.1fs)",
+                              where, prompt_on, now - hold_since)
+                elif want and not holding:
+                    screen.press_key("t")
+                    holding, hold_since = True, now
+                self.sleep(COLLECT_POLL_SEC)
+        finally:
+            screen.release_key("t")
+        log.warning("Não pegou %s em %.0fs (aviso de coleta visto=%s, T recomeçado %d vez(es)).",
+                    where, budget, seen_any, restarts)
+        return self._poll_new(before, time.perf_counter() + self.t("popup_wait_sec"))
+
+    def _drop_rod(self) -> None:
+        """Guarda a vara para o item cair no chão (a vara volta sozinha no próximo ciclo)."""
+        key = str(self.cfg["rod_key"]).strip().lower()
+        if not key:
+            return
+        self.cb.status(f"Item não veio da vara: guardando a vara ({key.upper()}) para pegar do chão...")
+        screen.tap_key(key)
+        self.sleep(self.t("rod_equip_wait_sec"))
+        _, img = self.frame()
+        log.info("Vara guardada para pegar do chão (vara na mão agora=%s)", hotbar.check_rod(img).equipped)
+
     def collect(self) -> list[loot_mod.Loot]:
         self.sleep(self.t("after_minigame_sec"))
         # Avisos de pescas anteriores ainda na tela não podem ser contados de novo.
         _, img = self.frame()
         before = loot_mod.read_popups(img)
-        self.cb.status("Segurando T para pegar...")
-        screen.press_key("t")
-        try:
-            fresh, img = self._poll_new(before, time.perf_counter() + self.t("collect_hold_sec"))
-        finally:
-            screen.release_key("t")
-        if not fresh:
-            fresh, img = self._poll_new(before, time.perf_counter() + self.t("popup_wait_sec"))
+        fresh, img = self._hold_t(before, self.t("collect_timeout_sec"), "da vara")
+        if not fresh and self.cfg.get("ground_pickup", True):
+            self._drop_rod()
+            fresh, img = self._hold_t(before, self.t("ground_pickup_sec"), "do chão")
+            if fresh:
+                log.info("Item recuperado do chão.")
         if before:
             log.debug("Avisos antigos ainda na tela: %s", [f"{i.name} x{i.quantity}" for i in before])
         fresh = [self._report(item, img) for item in fresh]

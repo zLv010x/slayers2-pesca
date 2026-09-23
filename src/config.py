@@ -23,6 +23,7 @@ DEFAULTS: dict = {
     "scan_area": {"x": 0.731640625, "y": 0.2923611111111111, "w": 0.03828125, "h": 0.3763888888888889},
     "compass_lock": True,
     "compass_tolerance_px": 6,
+    "ground_pickup": True,
     "discord": {
         "webhook_url": "",
         "user_id": "",
@@ -38,6 +39,8 @@ DEFAULTS: dict = {
         "ball_lost_sec": 1.5,
         "after_minigame_sec": 1.0,
         "collect_hold_sec": 3.0,
+        "collect_timeout_sec": 12.0,
+        "ground_pickup_sec": 8.0,
         "popup_wait_sec": 3.0,
         "after_collect_sec": 0.5,
         "rod_equip_wait_sec": 0.8,
