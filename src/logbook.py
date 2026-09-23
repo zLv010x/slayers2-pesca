@@ -20,7 +20,6 @@ LOG_NAME = "pesca"
 MAX_BYTES = 5 * 1024 * 1024
 BACKUPS = 5
 MAX_EVIDENCE = 200
-MAX_ITEM_SNAPSHOTS = 1000
 FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s %(module)s: %(message)s"
 DATEFMT = "%Y-%m-%d %H:%M:%S"
 
@@ -80,12 +79,3 @@ def save_evidence(img: np.ndarray | None, reason: str) -> Path | None:
         get().warning("Não consegui salvar o print (%s): %s", reason, exc)
         return None
 
-
-def save_item(img: np.ndarray | None, name: str) -> None:
-    """Guarda o recorte de cada item pego, para conferir se o nome foi lido certo."""
-    if img is None or _evidence_dir is None:
-        return
-    try:
-        _save_png(_evidence_dir.parent / "itens", img, name, MAX_ITEM_SNAPSHOTS)
-    except (OSError, cv2.error) as exc:
-        get().warning("Não consegui salvar o recorte de %s: %s", name, exc)

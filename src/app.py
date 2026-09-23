@@ -16,6 +16,7 @@ import config
 import logbook
 import screen
 import window
+from catalog import Catalog
 from compass import CompassLock
 from cycle import Callbacks, Fisher
 from pickers import AreaPicker, PointPicker
@@ -49,6 +50,7 @@ class App(ctk.CTk):
         self.session = Session(log_dir=config.LOG_DIR)
         self.compass = CompassLock()
         self.compass.load(COMPASS_FILE)
+        self.catalog = Catalog(config.CATALOG_DIR)
         self._posted: queue.SimpleQueue = queue.SimpleQueue()
         self.notifier = DiscordNotifier(on_error=lambda m: self.post(lambda: self.set_status(f"Discord: {m}")))
         self.apply_discord()
@@ -227,7 +229,7 @@ class App(ctk.CTk):
         self._render_running()
         cb = Callbacks(status=lambda m: self.post(lambda: self.set_status(m)),
                        loot=lambda items, snap: self.post(lambda: self._on_loot(items, snap)))
-        fisher = Fisher(copy.deepcopy(self.cfg), cb, self.session, self.notifier, self.compass)
+        fisher = Fisher(copy.deepcopy(self.cfg), cb, self.session, self.notifier, self.compass, self.catalog)
         threading.Thread(target=self._run_worker, args=(fisher,), daemon=True).start()
 
     def _run_worker(self, fisher: Fisher) -> None:

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 import numpy as np
@@ -24,6 +24,7 @@ import screen
 import window
 from bar_control import TrackController
 from bar_detect import Detector
+from catalog import Catalog
 from compass import CompassLock
 from session import Session
 from webhook import DiscordNotifier, LootReport
@@ -68,7 +69,9 @@ class PixelRect:
 
 class Fisher:
     def __init__(self, cfg: dict, cb: Callbacks, session: Session,
-                 notifier: DiscordNotifier, compass: CompassLock) -> None:
+                 notifier: DiscordNotifier, compass: CompassLock,
+                 catalog: Catalog | None = None) -> None:
+        self.catalog = catalog
         self.cfg = cfg
         self.cb = cb
         self.session = session
@@ -297,10 +300,7 @@ class Fisher:
             fresh, img = self._poll_new(before, time.perf_counter() + self.t("popup_wait_sec"))
         if before:
             log.debug("Avisos antigos ainda na tela: %s", [f"{i.name} x{i.quantity}" for i in before])
-        for item in fresh:
-            log.info("Pegou: %s x%d [%s]%s", item.name, item.quantity, item.rarity,
-                     " NOVO" if item.is_new else "")
-            self._report(item, img)
+        fresh = [self._report(item, img) for item in fresh]
         if not fresh:
             self.session.record_miss()
             log.warning("Nenhum aviso de item depois do T (drop perdido ou aviso não lido).")
@@ -311,9 +311,21 @@ class Fisher:
         self.sleep(self.t("after_collect_sec"))
         return fresh
 
-    def _report(self, item: loot_mod.Loot, img: np.ndarray) -> None:
+    def _report(self, item: loot_mod.Loot, img: np.ndarray) -> loot_mod.Loot:
+        """Passa o item pelo catálogo (nome/raridade certos), registra e avisa. Devolve o item corrigido."""
+        snap = loot_mod.item_snapshot(img, item)
+        if self.catalog is not None:
+            rec = self.catalog.record(item.name, item.rarity, snap)
+            if rec.corrected:
+                log.info("Nome corrigido pelo catálogo: %r -> %r", item.name, rec.name)
+            if rec.first_time:
+                log.info("Item novo no catálogo: %s", rec.name)
+            if rec.rarity != item.rarity:
+                log.info("Raridade pelo catálogo: %s (cor lida: %s)", rec.rarity, item.rarity)
+            item = replace(item, name=rec.name, rarity=rec.rarity)
+        log.info("Pegou: %s x%d [%s]%s", item.name, item.quantity, item.rarity,
+                 " NEW!" if item.is_new else "")
         self.session.record(item.name, item.quantity, item.rarity)
-        logbook.save_item(loot_mod.item_snapshot(img, item), item.name)
         d = self.cfg["discord"]
         tracked = str(d.get("tracked_item", "")).strip()
         self.notifier.send_loot(LootReport(
@@ -325,9 +337,10 @@ class Fisher:
             tracked_name=tracked,
             tracked_total=self.session.total_of(tracked) if tracked else 0,
             elapsed=self.session.elapsed_text(),
-            image=loot_mod.item_snapshot(img, item) if d.get("send_image", True) else None,
+            image=snap if d.get("send_image", True) else None,
             is_new=item.is_new,
         ))
+        return item
 
     # ---------- laço ----------
     def one_cycle(self) -> None:
