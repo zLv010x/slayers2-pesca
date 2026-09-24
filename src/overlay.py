@@ -31,8 +31,9 @@ FONT_TITLE = ("Segoe UI Semibold", 12)
 
 log = logbook.get()
 
-# Peixes que não têm "fish" no nome (Krathulon e Crustadon são os lendários da missão do Isao).
-FISH_NAMES = {"krathulon", "crustadon", "seahorse", "ouwfwesh"}
+# Peixes que não têm "fish" no nome (Krathulon e Crustadon são os lendários da missão do Isao;
+# o Coral conta como peixe: é vendido ao Ginzo como eles).
+FISH_NAMES = {"krathulon", "crustadon", "seahorse", "ouwfwesh", "coral"}
 
 
 class Line(NamedTuple):

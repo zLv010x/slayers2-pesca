@@ -15,7 +15,7 @@ def test_fish_by_name_and_known_list():
 
 
 def test_everything_else_is_item():
-    for name in ("Squid Beanie", "Refinement Ore", "Metal Scraps", "Coral", "Lost Mask"):
+    for name in ("Squid Beanie", "Refinement Ore", "Metal Scraps", "Lost Mask"):
         assert overlay.kind_of(name) == "item", name
 
 
@@ -23,7 +23,7 @@ def test_split_sorts_by_quantity_then_name():
     counts = Counter({"Ore": 3, "Clown Fish": 5, "Golden Fish": 5, "Coral": 7, "Zebra Fish": 1})
     fish, items = overlay.split_counts(counts)
     assert fish == [("Clown Fish", 5), ("Golden Fish", 5), ("Zebra Fish", 1)]
-    assert items == [("Coral", 7), ("Ore", 3)]
+    assert items == [("Ore", 3)]
 
 
 def test_split_ignores_zero_and_blank():
@@ -129,3 +129,11 @@ def test_peixe_sem_preco_fica_sem_valor_e_sem_total():
 
 def test_formata_valor_com_ponto_de_milhar():
     assert overlay.money(19470) == "19.470" and overlay.money(66) == "66"
+
+
+def test_coral_conta_como_peixe_e_entra_no_total():
+    """Pedido de 24/09: só peixe tem preço de venda, e o Coral conta como peixe."""
+    assert overlay.kind_of("Coral") == "peixe"
+    lines = overlay.build_lines("1m 00s", Counter({"Coral": 3, "Zebra Fish": 1, "Ore": 2}), Counter(),
+                                prices={"Coral": 33, "Zebra Fish": 66})
+    assert next(ln for ln in lines if ln.style == "total").value == 3 * 33 + 66
