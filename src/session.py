@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+# Quantos itens ficam no histórico da tela (o CSV guarda todos).
+MAX_RECENT = 500
+
 
 def format_elapsed(seconds: float) -> str:
     seconds = int(max(0, seconds))
@@ -59,8 +62,13 @@ class Session:
         self.counts[name] += quantity
         self.rarities[rarity] += 1
         self.last.insert(0, (now.strftime("%H:%M:%S"), name, quantity, rarity))
-        del self.last[50:]
+        del self.last[MAX_RECENT:]
         self._append_csv(now, name, quantity, rarity)
+
+    def recent(self, rarities: set[str], limit: int | None = None) -> list[tuple[str, str, int, str]]:
+        """Histórico (mais novo primeiro) só das raridades escolhidas; conjunto vazio = todas."""
+        items = [row for row in self.last if not rarities or row[3] in rarities]
+        return items[:limit] if limit else items
 
     def record_miss(self) -> None:
         self.misses += 1

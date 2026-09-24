@@ -22,6 +22,8 @@ MUTED = ("#6b7280", "#9ca3af")
 CARD = ("#eef2f7", "#1f2937")
 OK = "#22c55e"
 BAD = "#ef4444"
+CHIP_OFF = ("#d1d5db", "#2b3340")   # etiqueta fora do filtro: apagada
+RECENT_ROWS = 50
 
 ADVANCED_FIELDS = {
     "timings": [
@@ -84,11 +86,14 @@ class SessionTab:
         self.app = app
         chips = ctk.CTkFrame(parent, fg_color="transparent")
         chips.pack(fill="x", pady=(6, 4))
-        self.chips: dict[str, ctk.CTkLabel] = {}
+        # Etiquetas de raridade = filtro do histórico (nenhuma marcada = mostra tudo).
+        self.filter: set[str] = set()
+        self.chips: dict[str, ctk.CTkButton] = {}
         for rarity in RARITY_ORDER:
-            chip = ctk.CTkLabel(chips, text="0", height=26, corner_radius=13,
-                                fg_color=RARITY_HEX[rarity], text_color="white",
-                                font=ctk.CTkFont(size=11, weight="bold"))
+            chip = ctk.CTkButton(chips, text="0", height=26, width=40, corner_radius=13,
+                                 fg_color=RARITY_HEX[rarity], hover_color=RARITY_HEX[rarity],
+                                 text_color="white", font=ctk.CTkFont(size=11, weight="bold"),
+                                 command=lambda r=rarity: self.toggle_filter(r))
             chip.pack(side="left", expand=True, fill="x", padx=2)
             self.chips[rarity] = chip
 
@@ -125,17 +130,37 @@ class SessionTab:
             self.app.cfg["ui"]["show_recent"] = on
             self.app.save_soon()
 
-    def refresh(self) -> None:
+    def toggle_filter(self, rarity: str) -> None:
+        self.filter ^= {rarity}
+        self._shown = -1  # força redesenhar a lista
+        self.refresh()
+
+    def _paint_chips(self) -> None:
         s = self.app.session
         for rarity, chip in self.chips.items():
-            chip.configure(text=f"{webhook.RARITY_LABELS[rarity]} {s.rarities.get(rarity, 0)}")
+            on = not self.filter or rarity in self.filter
+            color = RARITY_HEX[rarity]
+            chip.configure(text=f"{webhook.RARITY_LABELS[rarity]} {s.rarities.get(rarity, 0)}",
+                           fg_color=color if on else CHIP_OFF, hover_color=color,
+                           text_color="white" if on else color)
+
+    def refresh(self) -> None:
+        s = self.app.session
+        self._paint_chips()
         if self._shown == s.catches:
             return
         self._shown = s.catches
         for r in self._rows:
             r.destroy()
         self._rows = []
-        for hora, name, qty, rarity in s.last[:30]:
+        rows = s.recent(self.filter, RECENT_ROWS)
+        if not rows:
+            chosen = ", ".join(webhook.RARITY_LABELS[r] for r in RARITY_ORDER if r in self.filter)
+            empty = ctk.CTkLabel(self.recent, text_color=MUTED,
+                                 text=f"Nenhum item {chosen} nesta sessão." if chosen else "Nada ainda.")
+            empty.pack(pady=8)
+            self._rows.append(empty)
+        for hora, name, qty, rarity in rows:
             line = ctk.CTkFrame(self.recent, fg_color="transparent")
             line.pack(fill="x", pady=1)
             ctk.CTkLabel(line, text="●", text_color=RARITY_HEX.get(rarity, "#9aa0a6"), width=14).pack(side="left")

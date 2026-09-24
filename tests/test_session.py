@@ -45,3 +45,23 @@ def test_config_antigo_com_20s_vira_10s(tmp_path):
     # quem escolheu outro valor mantém o seu
     p.write_text(json.dumps({"timings": {"minigame_start_timeout_sec": 15.0}}), encoding="utf-8")
     assert config.load(p)["timings"]["minigame_start_timeout_sec"] == 15.0
+
+
+def test_filtro_do_historico_por_raridade():
+    s = Session()
+    s.record("Coral", 1, "common")
+    s.record("Black Dragon Armour", 1, "mythic")
+    s.record("Golden Fish", 1, "rare")
+    s.record("Flame Scarf", 1, "mythic")
+    assert [n for _, n, _, _ in s.recent({"mythic"})] == ["Flame Scarf", "Black Dragon Armour"]
+    assert [n for _, n, _, _ in s.recent({"mythic", "rare"})] == ["Flame Scarf", "Golden Fish", "Black Dragon Armour"]
+    assert len(s.recent(set())) == 4          # nada selecionado = mostra tudo
+    assert s.recent({"legendary"}) == []
+
+
+def test_historico_guarda_itens_antigos_para_o_filtro():
+    s = Session()
+    s.record("Black Dragon Armour", 1, "mythic")
+    for _ in range(200):
+        s.record("Coral", 1, "common")
+    assert [n for _, n, _, _ in s.recent({"mythic"})] == ["Black Dragon Armour"]
