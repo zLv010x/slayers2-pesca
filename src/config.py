@@ -40,7 +40,7 @@ DEFAULTS: dict = {
         "after_minigame_sec": 1.0,
         "collect_hold_sec": 3.25,
         "collect_timeout_sec": 12.0,
-        "ground_pickup_sec": 8.0,
+        "ground_pickup_sec": 12.0,
         "popup_wait_sec": 3.0,
         "after_collect_sec": 0.5,
         "rod_equip_wait_sec": 0.8,
@@ -74,10 +74,11 @@ DEFAULTS: dict = {
         "recheck_at": 10,               # confere o inventário quando faltarem isso
     },
     "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True},
-    "config_rev": 2,
+    "config_rev": 3,
 }
 CONFIG_REV = DEFAULTS["config_rev"]
 OLD_START_TIMEOUT = 20.0  # padrão da versão 1 do config
+OLD_GROUND_PICKUP_SEC = 8.0  # padrão da versão 2 do config (só dava 1 tentativa)
 
 
 def _merge(base: dict, data: dict) -> dict:
@@ -114,6 +115,8 @@ def _migrate(cfg: dict, rev: int) -> dict:
     """Atualiza padrões antigos que a pessoa nunca mudou."""
     if rev < 2 and cfg["timings"]["minigame_start_timeout_sec"] == OLD_START_TIMEOUT:
         cfg["timings"]["minigame_start_timeout_sec"] = DEFAULTS["timings"]["minigame_start_timeout_sec"]
+    if rev < 3 and cfg["timings"]["ground_pickup_sec"] == OLD_GROUND_PICKUP_SEC:
+        cfg["timings"]["ground_pickup_sec"] = DEFAULTS["timings"]["ground_pickup_sec"]
     cfg["config_rev"] = CONFIG_REV
     return cfg
 

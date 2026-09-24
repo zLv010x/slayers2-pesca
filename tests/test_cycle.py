@@ -145,6 +145,35 @@ def test_desiste_no_tempo_limite_sem_travar(collect_env):
     assert env["keys"][-1][0] == "release"
 
 
+def test_reinicia_o_t_sem_deixar_passar_muito_da_folga_com_aviso_sempre_visivel(collect_env):
+    """Log real: tentativas de 4,5-4,7s de T seguro (com aviso na tela) falharam; a que
+    funcionou segurou só ~2,4s. Por isso a folga (HOLD_SLACK_SEC) tem que ser curta:
+    reinicia pouco depois do mínimo de 3,25s, não deixa passar de ~3,8s."""
+    f, env = collect_env
+    env["prompt"] = lambda t: True  # aviso sempre visível, sem cair (nunca "sumiu")
+    fresh, _ = f._hold_t([], 8.0, "da vara")
+    assert fresh == []
+    presses = _presses(env)
+    releases = [k for k in env["keys"] if k[0] == "release"]
+    assert len(presses) >= 2
+    first_hold = releases[0][2] - presses[0][2]
+    assert 3.25 <= first_hold <= 3.8
+
+
+def test_volta_a_segurar_no_escuro_depois_de_soltar_se_o_aviso_sumiu_de_vez(collect_env):
+    """Bug: depois que o aviso é visto uma vez e some para sempre, o modo às cegas
+    ficava travado (seen_any=True desliga o "blind") e o T nunca mais era apertado."""
+    f, env = collect_env
+    # aviso só aparece entre 1,5 s e 2,5 s; depois nunca mais volta (sem item)
+    env["prompt"] = lambda t: 1.5 <= t < 2.5
+    fresh, _ = f._hold_t([], 12.0, "da vara")
+    presses = _presses(env)
+    assert len(presses) >= 3
+    releases = [k for k in env["keys"] if k[0] == "release"]
+    # o 2º aperto vem logo depois de soltar (às cegas), não só perto do fim do orçamento
+    assert presses[1][2] - releases[0][2] <= 1.1
+
+
 def test_se_nao_vier_da_vara_guarda_a_vara_e_tenta_do_chao(presses, monkeypatch, tmp_path):
     from loot import Loot
     from session import Session

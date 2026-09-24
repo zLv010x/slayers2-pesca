@@ -74,13 +74,13 @@ def _is_t_glyph(glyph: np.ndarray) -> bool:
     return cols.size > 0 and abs(cols.mean() - (w - 1) / 2) <= T_STEM_CENTER_TOL * w
 
 
-def _find_t_glyph(white: np.ndarray, fw: int) -> tuple[int, int, int] | None:
+def _find_t_glyph(white: np.ndarray, ref: float) -> tuple[int, int, int] | None:
     """Acha o "T" escuro cercado de branco (serve para círculo e losango, mesmo grudado na vara)."""
     dark = (1 - white).astype(np.uint8)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(dark, connectivity=4)
     rh, rw = dark.shape
-    wmin, wmax = T_W_FRAC[0] * fw, T_W_FRAC[1] * fw
-    hmin, hmax = T_H_FRAC[0] * fw, T_H_FRAC[1] * fw
+    wmin, wmax = T_W_FRAC[0] * ref, T_W_FRAC[1] * ref
+    hmin, hmax = T_H_FRAC[0] * ref, T_H_FRAC[1] * ref
     for i in range(1, n):
         x, y, w, h, _ = stats[i]
         if x == 0 or y == 0 or x + w >= rw or y + h >= rh:
@@ -94,23 +94,32 @@ def _find_t_glyph(white: np.ndarray, fw: int) -> tuple[int, int, int] | None:
 
 def find_collect_prompt(frame: np.ndarray) -> Prompt | None:
     fh, fw = frame.shape[:2]
-    x0, x1 = int(REGION_X[0] * fw), int(REGION_X[1] * fw)
+    # O aviso acompanha o FOV vertical do Roblox, não a largura da janela: numa janela
+    # estreita (largura menor que 16:9) o aviso fica GRANDE demais para os limites em
+    # fração de fw, e o personagem (deslocado do centro) pode cair fora da faixa de
+    # busca horizontal. Por isso o tamanho e a região usam a largura "equivalente" a
+    # 16:9 calculada a partir da altura, centrada na janela real (que pode ser mais
+    # estreita que essa referência).
+    ref = fh * 16 / 9
+    x_half = (REGION_X[1] - REGION_X[0]) / 2 * ref
+    x0 = max(0, int(fw / 2 - x_half))
+    x1 = min(fw, int(fw / 2 + x_half))
     y0, y1 = int(REGION_Y[0] * fh), int(REGION_Y[1] * fh)
     region = frame[y0:y1, x0:x1]
     white = (region.min(axis=2) >= WHITE_MIN).astype(np.uint8)
-    found = _find_by_shape(white, fw)
+    found = _find_by_shape(white, ref)
     if found is None:
-        found = _find_t_glyph(white, fw)
+        found = _find_t_glyph(white, ref)
     if found is None:
         return None
     x, y, d = found
     return Prompt(int(x0 + x), int(y0 + y), int(d))
 
 
-def _find_by_shape(white: np.ndarray, fw: int) -> tuple[int, int, int] | None:
+def _find_by_shape(white: np.ndarray, ref: float) -> tuple[int, int, int] | None:
     """Círculo (ou losango) branco pequeno com um buraco no meio."""
     n, labels, stats, _ = cv2.connectedComponentsWithStats(white)
-    dmin, dmax = DIAM_FRAC[0] * fw, DIAM_FRAC[1] * fw
+    dmin, dmax = DIAM_FRAC[0] * ref, DIAM_FRAC[1] * ref
     for i in range(1, n):
         x, y, w, h, area = stats[i]
         if not (dmin <= w <= dmax and dmin <= h <= dmax):
