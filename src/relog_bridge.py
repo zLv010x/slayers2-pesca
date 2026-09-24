@@ -24,6 +24,7 @@ log = logbook.get()
 # Só essas telas disparam: as outras (servidor, carregando) só aparecem no meio do relog.
 ENTRY_KINDS = ("disconnected", "main_menu")
 DEFAULT_MAX_PER_HOUR = 4
+SPAWN_NOT_SET = "o spawn não foi setado no ponto de pesca"
 
 
 class RelogActions:
@@ -110,10 +111,10 @@ def not_ready_reason(cfg: dict) -> str | None:
         return "auto relog desligado"
     if not r.get("has_spawn_gamepass"):
         return "precisa do gamepass de spawn"
-    if not r.get("spawn_set"):
-        return "o spawn não foi setado no ponto de pesca"
     if r.get("server_mode") == "nick" and not str(r.get("owner_nick", "")).strip():
         return "falta o nick do dono do servidor"
+    if not r.get("spawn_set"):
+        return SPAWN_NOT_SET  # por último: esse a macro resolve sozinha (seta depois do 1º peixe)
     return None
 
 

@@ -15,19 +15,30 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
    - **Marcar ponto**: clique na água onde a vara deve lançar. A câmera (bússola) fica gravada junto.
    - **Tecla da vara**: o número do slot da vara na hotbar.
    - **Ajustar área**: só se a barra do minigame não for detectada.
-4. Aba **Discord** (opcional): cole o link do webhook e o seu ID para ser marcado nos itens raros.
-5. Aperte **F1** (ou o atalho que você escolher) para começar e parar.
+4. Aba **Relog** (opcional, precisa do gamepass **Set Spawn**):
+   - ligue **Reconectar sozinho se o jogo cair**;
+   - marque **Tenho o gamepass Set Spawn** e, se já setou, **Já setei o spawn no ponto de pesca**
+     (se não setou, a macro seta sozinha depois do 1º peixe, ou use **Setar spawn agora**);
+   - escolha **Tenho VIP** (volta para o seu servidor privado) ou **Não tenho VIP** e digite o
+     **nick exato** do dono do servidor. A linha colorida no alto da aba diz o que ainda falta.
+5. Aba **Discord** (opcional): cole o link do webhook e o seu ID para ser marcado nos itens raros.
+6. Aperte **F1** (ou o atalho que você escolher) para começar e parar.
 
 ## O que a macro faz sozinha
 
 - Confere se a vara está na mão antes de lançar e só aperta a tecla da vara quando precisa.
-- Pausa se o Roblox sair da frente ou se a câmera girar, e volta quando estiver tudo certo.
+- Pausa se o Roblox sair da frente, e volta quando estiver tudo certo.
+- Se a câmera girar, tenta girar de volta sozinha (arrastando com o botão direito); só pausa
+  esperando você se não conseguir. Numa pausa longa mexe o mouse 1 px a cada 4 min, para o
+  Roblox não desconectar por inatividade.
 - Se algo der errado (vara não equipa, vários lançamentos sem peixe, erro inesperado), avisa no
   Discord, espera e tenta de novo. Se desistir depois de várias falhas seguidas, **reinicia sozinha**
   depois de 5 min (até 3 vezes por hora; muda em **Avançado**).
 - Se você mexer no mouse bem na hora do lançamento, ela espera o mouse ficar livre e lança de novo.
-- Se o jogo voltar para o **menu principal** (servidor reiniciou ou você caiu), ela para, avisa no
-  Discord e não fica tentando: entre de novo, volte ao ponto de pesca e aperte F1.
+- Se o jogo cair (**menu principal** ou **Disconnected**): com o auto relog ligado (aba **Relog**),
+  reconecta, entra no servidor privado, nasce no spawn setado e volta a pescar. Desligado, ela para
+  e avisa no Discord: entre de novo, volte ao ponto de pesca e aperte F1. Se a conta entrou em
+  outro PC (erro 264), nunca reconecta.
 - **Overlay** por cima do jogo com o tempo de macro, o total de cada peixe e item e as iscas gastas.
   Fica em cima da party; com a pesca parada dá para arrastar. Liga/desliga e "Voltar para a party"
   em **Configurar → Janela**. Ele não aparece nos prints da macro e, pescando, o clique passa através dele.

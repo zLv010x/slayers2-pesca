@@ -26,6 +26,7 @@ from cycle import Callbacks, Fisher
 from pickers import AreaPicker, PointPicker
 from restart_policy import RestartPolicy
 from session import Session
+from relog_tab import RelogTab
 from tabs import MUTED, RARITY_HEX, AdvancedTab, DiscordTab, SessionTab, SetupTab
 from webhook import DiscordNotifier
 
@@ -135,10 +136,11 @@ class App(ctk.CTk):
 
         self.tabs = ctk.CTkTabview(self, corner_radius=12)
         self.tabs.pack(fill="both", expand=True, padx=14, pady=6)
-        for name in ("Sessão", "Configurar", "Discord", "Avançado"):
+        for name in ("Sessão", "Configurar", "Relog", "Discord", "Avançado"):
             self.tabs.add(name)
         self.session_tab = SessionTab(self, self.tabs.tab("Sessão"))
         self.setup_tab = SetupTab(self, self.tabs.tab("Configurar"))
+        self.relog_tab = RelogTab(self, self.tabs.tab("Relog"))
         self.discord_tab = DiscordTab(self, self.tabs.tab("Discord"))
         self._adv_parent = self.tabs.tab("Avançado")
         self.adv_tab = AdvancedTab(self, self._adv_parent, self.reset_advanced)
@@ -377,7 +379,7 @@ class App(ctk.CTk):
         if ok:
             self.cfg["relog"]["spawn_set"] = True
             self.save_soon()
-        self.setup_tab.sync_relog()
+        self.relog_tab.sync()
         self.set_status("Spawn setado no ponto de pesca." if ok else
                         "Não consegui setar o spawn: veja o log e sete na mão.")
 

@@ -1,11 +1,10 @@
-"""Abas da interface: Sessão, Configurar, Discord e Avançado."""
+"""Abas da interface: Sessão, Configurar, Discord e Avançado (a aba Relog fica em relog_tab.py)."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 
 import customtkinter as ctk
 
-import relog_bridge
 import webhook
 
 if TYPE_CHECKING:
@@ -24,8 +23,6 @@ CARD = ("#eef2f7", "#1f2937")
 OK = "#22c55e"
 BAD = "#ef4444"
 AMBER = "#d97706"
-# Rótulo na tela -> valor no config do auto relog
-RELOG_MODES = {"VIP (meu servidor)": "vip", "Servidor de outro": "nick"}
 CHIP_OFF = ("#d1d5db", "#2b3340")   # etiqueta fora do filtro: apagada
 RECENT_ROWS = 50
 
@@ -257,8 +254,6 @@ class SetupTab:
         hint(box, "Na 1ª vez a macro abre o menu (M → Inventory → Fishing) e conta as iscas. "
                   "Usa a primeira da ordem que você tiver; quando acabar, troca para a próxima e avisa.")
 
-        self._build_relog(scroll)
-
         box = section(scroll, "Atalhos")
         labels = {"start_stop": "Iniciar / parar", "set_cast_point": "Marcar ponto", "exit": "Fechar macro"}
         self.hotkey_btns: dict[str, ctk.CTkButton] = {}
@@ -301,72 +296,6 @@ class SetupTab:
             text_color=(OK if pt else BAD))
         for key, btn in self.hotkey_btns.items():
             btn.configure(text=self.app.cfg["hotkeys"][key])
-
-    def _build_relog(self, scroll) -> None:
-        rc = self.app.cfg["relog"]
-        box = section(scroll, "Auto relog")
-        r = row(box)
-        self.relog_on = ctk.CTkSwitch(r, text="Reconectar sozinho se o jogo cair", command=self._save_relog)
-        self.relog_on.pack(side="left")
-        self.relog_checks: dict[str, ctk.CTkCheckBox] = {}
-        for key, text in (("has_spawn_gamepass", "Tenho o gamepass de spawn"),
-                          ("spawn_set", "Já setei o spawn no ponto de pesca")):
-            cb = ctk.CTkCheckBox(row(box), text=text, command=self._save_relog)
-            cb.pack(side="left")
-            self.relog_checks[key] = cb
-        r = row(box)
-        ctk.CTkLabel(r, text="Servidor").pack(side="left")
-        self.relog_mode = ctk.CTkSegmentedButton(r, values=list(RELOG_MODES), command=lambda _v: self._save_relog())
-        self.relog_mode.pack(side="left", padx=8)
-        r = row(box)
-        ctk.CTkLabel(r, text="Nick do dono").pack(side="left")
-        self.relog_nick = ctk.CTkEntry(r, placeholder_text="nick exato (só para servidor de outro)")
-        self.relog_nick.pack(side="left", fill="x", expand=True, padx=8)
-        self.relog_nick.bind("<KeyRelease>", lambda _e: self._save_relog())
-        r = row(box)
-        ctk.CTkButton(r, text="Setar spawn agora", width=150, command=self.app.request_set_spawn).pack(side="left")
-        ctk.CTkLabel(r, text="fique no ponto de pesca", text_color=MUTED).pack(side="left", padx=6)
-        self.relog_state = hint(box, "")
-        hint(box, "Quando o jogo cai (menu ou 'Disconnected'): Reconnect → PLAY → Ouwland → servidor "
-                  "privado (o seu com VIP, ou o do nick) → nasce no spawn setado e volta a pescar.")
-        if rc.get("enabled"):
-            self.relog_on.select()
-        for key, cb in self.relog_checks.items():
-            if rc.get(key):
-                cb.select()
-        mode = next((label for label, value in RELOG_MODES.items() if value == rc.get("server_mode")), None)
-        self.relog_mode.set(mode or next(iter(RELOG_MODES)))
-        if rc.get("owner_nick"):
-            self.relog_nick.insert(0, rc["owner_nick"])
-        self._show_relog_state()
-
-    def sync_relog(self) -> None:
-        """Atualiza a caixa "Já setei o spawn" depois que a macro setou sozinha."""
-        if self.app.cfg["relog"].get("spawn_set"):
-            self.relog_checks["spawn_set"].select()
-        self._show_relog_state()
-
-    def _save_relog(self) -> None:
-        rc = self.app.cfg["relog"]
-        rc["enabled"] = bool(self.relog_on.get())
-        for key, cb in self.relog_checks.items():
-            rc[key] = bool(cb.get())
-        rc["server_mode"] = RELOG_MODES.get(self.relog_mode.get(), "vip")
-        rc["owner_nick"] = self.relog_nick.get().strip()
-        self._show_relog_state()
-        self.app.save_soon()
-
-    def _show_relog_state(self) -> None:
-        rc = self.app.cfg["relog"]
-        reason = relog_bridge.not_ready_reason(self.app.cfg)
-        if rc.get("enabled") and rc.get("has_spawn_gamepass") and not rc.get("spawn_set"):
-            self.relog_state.configure(text="Vai setar o spawn sozinho ao iniciar a pesca "
-                                            "(comece no ponto de pesca).", text_color=AMBER)
-        elif reason is None:
-            self.relog_state.configure(text="✓ Pronto: se o jogo cair, reconecta sozinho.", text_color=OK)
-        else:
-            enabled = self.app.cfg["relog"].get("enabled")
-            self.relog_state.configure(text=f"Não vai reconectar: {reason}.", text_color=BAD if enabled else MUTED)
 
     def _save_lock(self) -> None:
         self.app.cfg["compass_lock"] = bool(self.lock.get())

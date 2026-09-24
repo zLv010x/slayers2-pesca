@@ -108,6 +108,7 @@ def test_limite_de_reconexoes_por_hora(fisher, monkeypatch):
     (dict(enabled=True), "gamepass"),
     (dict(enabled=True, has_spawn_gamepass=True), "spawn"),
     (dict(READY, server_mode="nick", owner_nick=" "), "nick"),
+    (dict(enabled=True, has_spawn_gamepass=True, server_mode="nick"), "nick"),  # nick antes do spawn
 ])
 def test_motivo_de_nao_estar_pronto(over, reason):
     assert reason in relog_bridge.not_ready_reason(_cfg(**over))
