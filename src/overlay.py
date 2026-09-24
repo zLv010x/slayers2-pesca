@@ -14,6 +14,7 @@ import tkinter as tk
 from collections import Counter
 from typing import Callable, NamedTuple
 
+import logbook
 import window
 from window import Rect
 
@@ -26,6 +27,8 @@ BG, FG, HEAD, MUTED, QTY = "#111827", "#e5e7eb", "#93c5fd", "#9ca3af", "#fbbf24"
 FONT = ("Segoe UI", 10)
 FONT_BOLD = ("Segoe UI Semibold", 10)
 FONT_TITLE = ("Segoe UI Semibold", 12)
+
+log = logbook.get()
 
 # Peixes que não têm "fish" no nome (Krathulon e Crustadon são os lendários da missão do Isao).
 FISH_NAMES = {"krathulon", "crustadon", "seahorse"}
@@ -144,8 +147,10 @@ class Overlay(tk.Toplevel):
         self.attributes("-alpha", 0.0)
         self.deiconify()
         self.update_idletasks()
-        window.set_capture_excluded(self, True)
-        window.set_overlay_style(self, clickthrough=False)
+        if not window.set_capture_excluded(self, True):
+            log.warning("Overlay: não deu para esconder dos prints (Windows antigo?)")
+        if not window.set_overlay_style(self, clickthrough=False):
+            log.warning("Overlay: não deu para aplicar o estilo (pode roubar foco)")
         window.show_no_activate(self, False)
         self.attributes("-alpha", ALPHA)
 
@@ -202,7 +207,8 @@ class Overlay(tk.Toplevel):
         self._clickthrough = on
         if on:
             self._drag = None
-        window.set_overlay_style(self, clickthrough=on)
+        if not window.set_overlay_style(self, clickthrough=on):
+            log.warning("Overlay: não deu para %s o clique através dele", "ligar" if on else "desligar")
 
     # ------------------------------------------------------------ arrastar
     def _bind_drag(self, widget: tk.Misc) -> None:

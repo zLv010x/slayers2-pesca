@@ -39,6 +39,8 @@ TICK_MS = 1000
 FOCUS_DELAY_MS = 350
 MINIMIZE_DELAY_MS = 150
 CLOSE_WAIT_SEC = 3.0
+# Reinício automático na hora em que você marca ponto/atalho: tenta de novo depois disso.
+RESTART_RETRY_MS = 30_000
 SNAPSHOT_MAX_H = 60
 GREEN, GREEN_HOVER = "#16a34a", "#15803d"
 RED, RED_HOVER = "#dc2626", "#b91c1c"
@@ -413,9 +415,16 @@ class App(ctk.CTk):
         self._restart_job = None
         if self._running:
             return
+        if self._listening or self._picker_open:
+            # marcando ponto/atalho agora: tenta daqui a pouco, sem gastar a vez
+            self._restart_job = self.after(RESTART_RETRY_MS, self._auto_restart)
+            return
+        self.toggle_run()
+        if not self._running:
+            self._notify_problem(f"⚠️ Não consegui reiniciar a pesca sozinha: {self.status.cget('text')}")
+            return
         self._restart_policy.record_restart()
         self._notify_problem("🎣 Reiniciando a pesca sozinha.")
-        self.toggle_run()
 
     def _on_loot(self, items: list, snapshot) -> None:
         self._refresh_stats()
@@ -567,6 +576,12 @@ class App(ctk.CTk):
         # espera a pesca soltar T/mouse (o finally dela) antes de fechar o programa
         if self._worker is not None and self._worker.is_alive():
             self._worker.join(timeout=CLOSE_WAIT_SEC)
+            if self._worker.is_alive():
+                # não parou a tempo: a thread morre junto com o programa sem soltar nada
+                logbook.get().warning("A pesca não parou em %.0fs: soltando T e mouse antes de fechar.",
+                                      CLOSE_WAIT_SEC)
+                screen.release_key("t")
+                screen.MouseButton().release()
         keyboard.unhook_all_hotkeys()
         self._save_now()
         self.destroy()

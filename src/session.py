@@ -36,25 +36,28 @@ class Session:
     _run_start: float | None = None     # início da rodada atual (None = parado)
     # record() roda na thread da pesca enquanto a aba Sessão lê a cada 1s na thread da
     # interface: sem isso, dá RuntimeError de dicionário mudando de tamanho na leitura.
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
     @property
     def running(self) -> bool:
         return self._run_start is not None
 
     def start(self) -> None:
-        if self._run_start is None:
-            self._run_start = time.monotonic()
+        with self._lock:
+            if self._run_start is None:
+                self._run_start = time.monotonic()
 
     def pause(self) -> None:
-        if self._run_start is not None:
-            self._active_sec += time.monotonic() - self._run_start
-            self._run_start = None
+        with self._lock:
+            if self._run_start is not None:
+                self._active_sec += time.monotonic() - self._run_start
+                self._run_start = None
 
     def elapsed_seconds(self) -> float:
         """Só o tempo em que a macro estava pescando (parado não conta)."""
-        current = time.monotonic() - self._run_start if self._run_start is not None else 0.0
-        return self._active_sec + current
+        with self._lock:
+            current = time.monotonic() - self._run_start if self._run_start is not None else 0.0
+            return self._active_sec + current
 
     def elapsed_text(self) -> str:
         return format_elapsed(self.elapsed_seconds())

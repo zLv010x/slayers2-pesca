@@ -405,17 +405,21 @@ class Fisher:
                 # só considera que o aviso sumiu de verdade depois de várias checagens seguidas
                 lost = misses >= PROMPT_LOST_CHECKS and now - last_seen >= PROMPT_LOST_SEC
                 prompt_on = seen_any and not lost
-                # às cegas se o aviso não está na tela e já passou a folga desde o início
-                # ou desde a última vez que soltou o T (senão travava depois de ver o aviso
-                # uma vez e ele sumir de vez: seen_any não voltava a False nunca).
-                blind = not prompt_on and now - max(start, released_at) >= PROMPT_GRACE_SEC
+                if seen_any:
+                    # O aviso já apareceu: segue o aviso. Sumiu de vez → solta e, passada a folga
+                    # desde que soltou, tenta de novo às cegas (antes travava sem apertar mais).
+                    blind = not prompt_on and now - released_at >= PROMPT_GRACE_SEC
+                else:
+                    # Nunca viu o aviso: segura no escuro como antes, só soltando pela folga
+                    # para reapertar na hora (sem buraco de ~1 s, que poderia zerar a coleta).
+                    blind = now - start >= PROMPT_GRACE_SEC
                 want = prompt_on or blind
                 held = now - hold_since
                 # Depois de apertar, segura pelo menos o tempo que o jogo pede: com a câmera longe o
                 # aviso vira um losango pequeno que o detector perde, mas ele continua na tela.
-                # Só solta de verdade quando o aviso realmente sumiu (não só o "às cegas" achando
-                # que talvez esteja) ou quando passou do tempo sem vir nada.
-                if holding and ((not prompt_on and held >= hold_need) or held > hold_need + HOLD_SLACK_SEC):
+                # Só solta antes da folga quando o aviso visto realmente sumiu.
+                lost_it = seen_any and not prompt_on and held >= hold_need
+                if holding and (lost_it or held > hold_need + HOLD_SLACK_SEC):
                     screen.release_key("t")
                     holding = False
                     released_at = now

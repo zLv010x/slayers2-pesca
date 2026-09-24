@@ -152,6 +152,7 @@ class DiscordNotifier:
         self.ping_rarities: set[str] = {"mythic"}
         self._on_error = on_error or (lambda msg: None)
         self._queue: queue.Queue = queue.Queue()
+        self._enqueue_lock = threading.Lock()  # pesca e interface mandam avisos ao mesmo tempo
         threading.Thread(target=self._worker, daemon=True).start()
 
     @property
@@ -180,13 +181,14 @@ class DiscordNotifier:
 
     def _enqueue(self, item: tuple) -> None:
         """Poe na fila; se estiver cheia (Discord fora do ar por muito tempo), descarta o mais antigo."""
-        if self._queue.qsize() >= MAX_QUEUE:
-            try:
-                self._queue.get_nowait()
-                log.warning("Fila do Discord cheia (%d): descartando o aviso mais antigo.", MAX_QUEUE)
-            except queue.Empty:
-                pass
-        self._queue.put(item)
+        with self._enqueue_lock:
+            if self._queue.qsize() >= MAX_QUEUE:
+                try:
+                    self._queue.get_nowait()
+                    log.warning("Fila do Discord cheia (%d): descartando o aviso mais antigo.", MAX_QUEUE)
+                except queue.Empty:
+                    pass
+            self._queue.put(item)
 
     def _worker(self) -> None:
         while True:

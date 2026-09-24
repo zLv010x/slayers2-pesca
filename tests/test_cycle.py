@@ -634,3 +634,19 @@ def test_camera_girada_nao_procura_menu(monkeypatch):
     f.compass = FakeCompass([40, 40, 0])  # bússola achada, só girada: não é o menu
     f.check_camera()
     assert called == []
+
+
+def test_aviso_nunca_visto_segura_quase_continuo_como_antes(collect_env):
+    """Revisão de 24/09: às cegas do começo ao fim, o T só pode soltar para reapertar
+    (sem buraco de ~1 s, que poderia zerar a coleta), e cada aperto dura o mínimo."""
+    f, env = collect_env
+    env["prompt"] = lambda t: False
+    f._hold_t([], 12.0, "da vara")
+    keys = env["keys"]
+    presses = [t for kind, _, t in keys if kind == "press"]
+    releases = [t for kind, _, t in keys if kind == "release"]
+    assert presses and presses[0] <= 1.1
+    for rel, nxt in zip(releases, presses[1:]):
+        assert nxt - rel <= 0.2, (rel, nxt)
+    for p, rel in zip(presses, releases[:-1]):
+        assert rel - p >= cycle.MIN_T_HOLD_SEC
