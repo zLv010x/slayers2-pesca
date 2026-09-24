@@ -1,3 +1,84 @@
 {
-  "items": []
+  "items": [
+    {
+      "name": "Clown Fish",
+      "slug": "clown-fish",
+      "image": "imagens/clown-fish.png",
+      "rarity": "rare",
+      "rarity_votes": {
+        "rare": 5
+      },
+      "aliases": []
+    },
+    {
+      "name": "Coral",
+      "slug": "coral",
+      "image": null,
+      "rarity": "common",
+      "rarity_votes": {
+        "common": 5
+      },
+      "aliases": []
+    },
+    {
+      "name": "Crustadon",
+      "slug": "crustadon",
+      "image": null,
+      "rarity": "legendary",
+      "rarity_votes": {
+        "legendary": 5
+      },
+      "aliases": [
+        "C r Ltstadon"
+      ]
+    },
+    {
+      "name": "Golden Fish",
+      "slug": "golden-fish",
+      "image": "imagens/golden-fish.png",
+      "rarity": "rare",
+      "rarity_votes": {
+        "rare": 5
+      },
+      "aliases": []
+    },
+    {
+      "name": "OuwFish",
+      "slug": "ouwfish",
+      "image": null,
+      "rarity": "common",
+      "rarity_votes": {
+        "common": 5
+      },
+      "aliases": [
+        "OuwFwesh"
+      ]
+    },
+    {
+      "name": "Squid Beanie",
+      "slug": "squid-beanie",
+      "image": "imagens/squid-beanie.png",
+      "rarity": "rare",
+      "rarity_votes": {
+        "rare": 5
+      },
+      "aliases": []
+    },
+    {
+      "name": "Zebra Fish",
+      "slug": "zebra-fish",
+      "image": "imagens/zebra-fish.png",
+      "rarity": "rare",
+      "rarity_votes": {
+        "rare": 5
+      },
+      "aliases": [
+        "'Zebra Fish",
+        "H Zebra Fish",
+        "Jzebra Fish",
+        "U Zebra Fish",
+        "u) uzebra Fish"
+      ]
+    }
+  ]
 }

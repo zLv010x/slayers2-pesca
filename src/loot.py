@@ -28,10 +28,14 @@ QTY_OCR_HEIGHT = 200
 MIN_NAME_LEN = 2
 # Quantas alturas de letra o "xN" pode estar para o lado do nome.
 QTY_SIDE_REACH = 4
+LEADING_STRAY_RX = re.compile(r"^\S\s+(?=\S{3,})")
 NAME_EDGE_JUNK = re.compile(r"^[^\w(]+|[^\w)!?]+$")
 # Texto dos avisos é branco; ampliar 2x ajuda a ler o "xN" pequeno.
 WHITE_TEXT_MIN = 200
 OCR_UPSCALE = 2
+# Telas menores (1920) deixam o texto menos branco: tenta outras combinações de
+# (limite de branco, ampliação) até achar o aviso.
+OCR_VARIANTS = ((200, 2), (155, 3), (185, 2))
 
 # Selo amarelo "NEW!" que substitui o "xN" quando o item é novo na coleção.
 NEW_HUE = (15, 35)
@@ -43,7 +47,8 @@ NEW_MIN_FRAC = 0.12
 BAND_PAD = 8
 MIN_SAT = 55
 MIN_VAL = 60
-MIN_COLOR_FRAC = 0.08
+# Faixa colorida de verdade dá 30%+ de pixels da cor; o brilho bege das comuns dá ~8%.
+MIN_COLOR_FRAC = 0.15
 # Matizes do OpenCV (0-179), medidas no inventário: azul ~101, roxo ~150,
 # dourado ~22, vermelho ~1.
 HUE_RANGES = (
@@ -118,9 +123,9 @@ def _read_quantity(frame: np.ndarray, x: int, y: int, w: int, h: int) -> int | N
     return None
 
 
-def _white_text(bgr: np.ndarray) -> np.ndarray:
+def _white_text(bgr: np.ndarray, threshold: int = WHITE_TEXT_MIN) -> np.ndarray:
     """Deixa só o texto branco (preto sobre branco): o OCR erra muito com o jogo atrás."""
-    mask = bgr.min(axis=2) >= WHITE_TEXT_MIN
+    mask = bgr.min(axis=2) >= threshold
     out = np.full(mask.shape, 255, np.uint8)
     out[mask] = 0
     return cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
@@ -139,8 +144,13 @@ def has_new_badge(frame: np.ndarray, x: int, y: int, w: int, h: int) -> bool:
 
 
 def clean_name(text: str) -> str:
-    """Tira sujeira que o OCR põe nas pontas ("'Zebra Fish" -> "Zebra Fish")."""
-    return NAME_EDGE_JUNK.sub("", text).strip()
+    """Tira sujeira que o OCR põe nas pontas ("'Zebra Fish" -> "Zebra Fish").
+
+    Também tira uma letra solta no começo: o desenho do item grudado no nome às vezes
+    é lido como letra ("U Zebra Fish", "H Zebra Fish").
+    """
+    name = NAME_EDGE_JUNK.sub("", text).strip()
+    return LEADING_STRAY_RX.sub("", name).strip()
 
 
 def _qty_below(line: ocr.Line, lines: list[ocr.Line]) -> int | None:
@@ -164,11 +174,19 @@ def _qty_below(line: ocr.Line, lines: list[ocr.Line]) -> int | None:
 
 def read_popups(frame: np.ndarray) -> list[Loot]:
     """Todos os avisos de item visíveis (eles se empilham, um embaixo do outro)."""
+    for threshold, upscale in OCR_VARIANTS:
+        found = _read_popups_once(frame, threshold, upscale)
+        if found:
+            return found
+    return []
+
+
+def _read_popups_once(frame: np.ndarray, threshold: int, upscale: int) -> list[Loot]:
     fh, fw = frame.shape[:2]
     rx0, rx1 = int(REGION_X[0] * fw), int(REGION_X[1] * fw)
     ry0, ry1 = int(REGION_Y[0] * fh), int(REGION_Y[1] * fh)
     region = frame[ry0:ry1, rx0:rx1]
-    lines = ocr.read_lines(_white_text(region), min_height=OCR_UPSCALE * region.shape[0])
+    lines = ocr.read_lines(_white_text(region, threshold), min_height=upscale * region.shape[0])
     found: list[Loot] = []
     for line in lines:
         name = clean_name(line.text)

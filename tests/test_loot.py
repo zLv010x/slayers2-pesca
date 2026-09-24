@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 
 from loot import _parse_qty, classify_rarity, item_snapshot, read_popup
@@ -92,3 +93,29 @@ def test_limpa_sujeira_do_ocr_no_nome():
     assert clean_name("- Coral .") == "Coral"
     assert clean_name("Black Dragon Armour") == "Black Dragon Armour"
     assert clean_name("!!") == ""
+
+
+def test_letra_solta_antes_do_nome_sai():
+    from loot import clean_name
+    assert clean_name("U Zebra Fish") == "Zebra Fish"
+    assert clean_name("H Zebra Fish") == "Zebra Fish"
+    assert clean_name("Zebra Fish") == "Zebra Fish"
+    assert clean_name("Ore") == "Ore"
+
+
+def test_coral_e_comum_nao_legendary(shot):
+    # o brilho bege atrás do nome + madeira marrom viravam "dourado"
+    assert read_popup(shot("popup_coral.webp")).rarity == "common"
+
+
+@pytest.mark.parametrize("name, title_bar, expected", [
+    ("popup_coral.webp", 0, "Coral"),
+    ("popup_golden_fish.webp", 18, "Golden Fish"),
+])
+def test_le_o_aviso_em_tela_1920(shot, name, title_bar, expected):
+    import cv2
+    img = shot(name)[title_bar:]
+    scale = 1920 / img.shape[1]
+    small = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    loot = read_popup(small)
+    assert loot is not None and (loot.name, loot.quantity) == (expected, 1)
