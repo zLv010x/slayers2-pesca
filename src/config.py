@@ -38,7 +38,7 @@ DEFAULTS: dict = {
         "minigame_max_sec": 120.0,
         "ball_lost_sec": 1.5,
         "after_minigame_sec": 1.0,
-        "collect_hold_sec": 3.0,
+        "collect_hold_sec": 3.25,
         "collect_timeout_sec": 12.0,
         "ground_pickup_sec": 8.0,
         "popup_wait_sec": 3.0,

@@ -99,7 +99,7 @@ def collect_env(monkeypatch):
                         lambda img: object() if env["prompt"](clock.now) else None)
     fish = Loot("Coral", 1, "common", (0, 0, 1, 1))
     monkeypatch.setattr(cycle.loot_mod, "read_popups",
-                        lambda img: [fish] if env["drop_at"] is not None and clock.now >= env["drop_at"] else [])
+                        lambda img, **kw: [fish] if env["drop_at"] is not None and clock.now >= env["drop_at"] else [])
     f = FakeFisher([])
     f.frame = lambda: (None, None)
     return f, env
@@ -153,7 +153,7 @@ def test_se_nao_vier_da_vara_guarda_a_vara_e_tenta_do_chao(presses, monkeypatch,
     f.cfg["timings"]["after_minigame_sec"] = 0
     f.cfg["timings"]["after_collect_sec"] = 0
     f.cfg["discord"]["send_image"] = False
-    monkeypatch.setattr(cycle.loot_mod, "read_popups", lambda img: [])
+    monkeypatch.setattr(cycle.loot_mod, "read_popups", lambda img, **kw: [])
     monkeypatch.setattr(cycle.loot_mod, "item_snapshot", lambda img, item: None)
     f.notifier = type("N", (), {"send_loot": lambda self, r: None})()
     fish = Loot("Coral", 1, "common", (0, 0, 1, 1))
@@ -178,7 +178,7 @@ def test_opcao_desligada_nao_mexe_na_vara(presses, monkeypatch, tmp_path):
     f.cfg["ground_pickup"] = False
     f.cfg["timings"]["after_minigame_sec"] = 0
     f.cfg["timings"]["after_collect_sec"] = 0
-    monkeypatch.setattr(cycle.loot_mod, "read_popups", lambda img: [])
+    monkeypatch.setattr(cycle.loot_mod, "read_popups", lambda img, **kw: [])
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
     f._hold_t = lambda before, budget, where: ([], None)
     assert f.collect() == []
@@ -288,7 +288,7 @@ def game_env(monkeypatch):
     def release(k):
         st["press_at"] = None
 
-    def read_popups(img):
+    def read_popups(img, **kw):
         t = clock.now
         if st["press_at"] is not None:
             if not env["visible"](t):
@@ -322,3 +322,18 @@ def test_item_balanca_de_verdade_e_ainda_assim_vem(game_env):
     env["detected"] = lambda t, holding: env["visible"](t)
     fresh, _ = f._hold_t([], 12.0, "da vara")
     assert fresh and env["st"]["presses"] >= 2       # precisou apertar de novo depois que voltou
+
+
+def test_t_fica_apertado_pelo_menos_3_25s(game_env, monkeypatch):
+    # pedido do usuário: mesmo o detector perdendo o aviso, nunca soltar T antes de 3,25 s
+    f, env = game_env
+    env["visible"] = lambda t: False                       # o item nunca vem: só observa o T
+    env["detected"] = lambda t, holding: not holding       # detector perde o aviso com T apertado
+    presses, releases = [], []
+    monkeypatch.setattr(cycle.screen, "press_key", lambda k: presses.append(cycle.time.perf_counter()))
+    monkeypatch.setattr(cycle.screen, "release_key", lambda k: releases.append(cycle.time.perf_counter()))
+    f._hold_t([], 8.0, "da vara")
+    assert presses
+    first_press = presses[0]
+    first_release = min(r for r in releases if r > first_press)
+    assert first_release - first_press >= cycle.MIN_T_HOLD_SEC

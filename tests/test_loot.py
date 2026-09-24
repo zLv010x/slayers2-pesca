@@ -119,3 +119,9 @@ def test_le_o_aviso_em_tela_1920(shot, name, title_bar, expected):
     small = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     loot = read_popup(small)
     assert loot is not None and (loot.name, loot.quantity) == (expected, 1)
+
+
+def test_aviso_pequeno_em_janela_1002(shot):
+    # print real do Inside (Roblox em janela 1002x981): nome com ~9 px e aviso apagando
+    loot = read_popup(shot("popup_janela_1002.webp"))
+    assert loot is not None and (loot.name, loot.quantity) == ("Zebra Fish", 1)

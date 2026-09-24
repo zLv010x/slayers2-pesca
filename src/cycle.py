@@ -46,6 +46,8 @@ PROMPT_LOST_CHECKS = 3
 # Se o aviso nunca aparecer nesse tempo, segura T "no escuro" (como a versão antiga).
 PROMPT_GRACE_SEC = 1.0
 HOLD_SLACK_SEC = 1.5
+# Pedido do usuário: segurar T sempre pelo menos isso (o jogo pede ~2,3 s).
+MIN_T_HOLD_SEC = 3.25
 FOREGROUND_POLL_SEC = 0.5
 STATS_EVERY_CYCLES = 10
 # Conferência de iscas que falhou: tenta de novo depois de tantos ciclos.
@@ -317,16 +319,20 @@ class Fisher:
         solta o T quando o aviso some e aperta de novo quando ele volta. Se o aviso
         nunca for detectado, segura "no escuro" (como antes) para não travar.
         """
-        hold_need = self.t("collect_hold_sec")
+        hold_need = max(self.t("collect_hold_sec"), MIN_T_HOLD_SEC)
         start = time.perf_counter()
         deadline = start + budget
         holding, hold_since, last_seen, seen_any, restarts = False, 0.0, -1.0, False, 0
-        misses = 0
+        misses, polls = 0, 0
         self.cb.status(f"Segurando T para pegar ({where})...")
         try:
             while time.perf_counter() < deadline:
                 _, img = self.frame()
-                fresh = loot_mod.new_items(before, loot_mod.read_popups(img))
+                # leitura rápida (uma variante por vez, alternando); achou algo → confere com todas
+                variant = loot_mod.OCR_VARIANTS[polls % len(loot_mod.OCR_VARIANTS)]
+                polls += 1
+                quick = loot_mod.read_popups(img, variants=(variant,), best=False)
+                fresh = loot_mod.new_items(before, loot_mod.read_popups(img)) if quick else []
                 if fresh:
                     if restarts:
                         log.info("Item pego %s depois de %d recomeço(s) do T.", where, restarts)

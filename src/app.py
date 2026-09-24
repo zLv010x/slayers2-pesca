@@ -32,6 +32,7 @@ PUMP_MS = 30
 TICK_MS = 1000
 FOCUS_DELAY_MS = 350
 MINIMIZE_DELAY_MS = 150
+CLOSE_WAIT_SEC = 3.0
 SNAPSHOT_MAX_H = 60
 GREEN, GREEN_HOVER = "#16a34a", "#15803d"
 RED, RED_HOVER = "#dc2626", "#b91c1c"
@@ -68,6 +69,7 @@ class App(ctk.CTk):
         self._hotkey_handles: list = []
         self._picker_open = False
         self._minimized_by_run = False
+        self._worker: threading.Thread | None = None
         self._snapshot = None  # mantém a imagem viva (senão o Tk apaga)
 
         self._build()
@@ -263,7 +265,8 @@ class App(ctk.CTk):
         fisher.bait_check_requested = self._bait_check_pending
         self._bait_check_pending = False
         self._fisher = fisher
-        threading.Thread(target=self._run_worker, args=(fisher,), daemon=True).start()
+        self._worker = threading.Thread(target=self._run_worker, args=(fisher,), daemon=True)
+        self._worker.start()
         if self.cfg["ui"].get("minimize_on_start", True):
             self._minimized_by_run = True
             self.after(MINIMIZE_DELAY_MS, self._minimize)
@@ -461,6 +464,9 @@ class App(ctk.CTk):
 
     def close(self) -> None:
         self._stop.set()
+        # espera a pesca soltar T/mouse (o finally dela) antes de fechar o programa
+        if self._worker is not None and self._worker.is_alive():
+            self._worker.join(timeout=CLOSE_WAIT_SEC)
         keyboard.unhook_all_hotkeys()
         self._save_now()
         self.destroy()

@@ -35,7 +35,8 @@ WHITE_TEXT_MIN = 200
 OCR_UPSCALE = 2
 # Telas menores (1920) deixam o texto menos branco: tenta outras combinações de
 # (limite de branco, ampliação) até achar o aviso.
-OCR_VARIANTS = ((200, 2), (155, 3), (185, 2))
+# None = sem limite: cinza invertido (acha aviso apagando/pequeno; ex.: janela 1002x981).
+OCR_VARIANTS = ((200, 2), (155, 3), (185, 2), (None, 3))
 
 # Selo amarelo "NEW!" que substitui o "xN" quando o item é novo na coleção.
 NEW_HUE = (15, 35)
@@ -115,16 +116,23 @@ def _read_quantity(frame: np.ndarray, x: int, y: int, w: int, h: int) -> int | N
     crop = frame[max(0, y - h):min(fh, y + 3 * h), max(0, x - reach):min(fw, x + w + reach)]
     if crop.size == 0:
         return None
-    lines = ocr.read_lines(_white_text(crop), min_height=QTY_OCR_HEIGHT)
-    for line in lines:
-        qty = _parse_qty(line.text)
-        if qty is not None and line.y > h // 2:
-            return qty
+    # o "xN" é bem pequeno: o limite de branco às vezes apaga ele; aí tenta sem limite
+    for threshold in (WHITE_TEXT_MIN, None):
+        for line in ocr.read_lines(_white_text(crop, threshold), min_height=QTY_OCR_HEIGHT):
+            qty = _parse_qty(line.text)
+            if qty is not None and line.y > h // 2:
+                return qty
     return None
 
 
-def _white_text(bgr: np.ndarray, threshold: int = WHITE_TEXT_MIN) -> np.ndarray:
-    """Deixa só o texto branco (preto sobre branco): o OCR erra muito com o jogo atrás."""
+def _white_text(bgr: np.ndarray, threshold: int | None = WHITE_TEXT_MIN) -> np.ndarray:
+    """Deixa só o texto branco (preto sobre branco): o OCR erra muito com o jogo atrás.
+
+    threshold=None: sem limite, só inverte o cinza (texto claro vira escuro).
+    """
+    if threshold is None:
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        return cv2.cvtColor(255 - gray, cv2.COLOR_GRAY2BGR)
     mask = bgr.min(axis=2) >= threshold
     out = np.full(mask.shape, 255, np.uint8)
     out[mask] = 0
@@ -172,16 +180,31 @@ def _qty_below(line: ocr.Line, lines: list[ocr.Line]) -> int | None:
     return None
 
 
-def read_popups(frame: np.ndarray) -> list[Loot]:
-    """Todos os avisos de item visíveis (eles se empilham, um embaixo do outro)."""
-    for threshold, upscale in OCR_VARIANTS:
+def _name_score(items: list[Loot]) -> int:
+    """Nome "limpo" = muitas letras e nenhum símbolo estranho ('Fisll', 'Fi-.h' perdem)."""
+    return sum(len(re.sub(r"[^A-Za-z]", "", i.name)) - 3 * len(re.sub(r"[A-Za-z0-9 ']", "", i.name))
+               for i in items)
+
+
+def read_popups(frame: np.ndarray, variants=OCR_VARIANTS, best: bool = True) -> list[Loot]:
+    """Todos os avisos de item visíveis (eles se empilham, um embaixo do outro).
+
+    best=True: roda todas as variantes e fica com a leitura mais completa/limpa.
+    best=False: para na primeira variante que achar algo (para checagens rápidas).
+    """
+    results = []
+    for threshold, upscale in variants:
         found = _read_popups_once(frame, threshold, upscale)
         if found:
-            return found
-    return []
+            if not best:
+                return found
+            results.append(found)
+    if not results:
+        return []
+    return max(results, key=lambda r: (len(r), _name_score(r)))
 
 
-def _read_popups_once(frame: np.ndarray, threshold: int, upscale: int) -> list[Loot]:
+def _read_popups_once(frame: np.ndarray, threshold: int | None, upscale: int) -> list[Loot]:
     fh, fw = frame.shape[:2]
     rx0, rx1 = int(REGION_X[0] * fw), int(REGION_X[1] * fw)
     ry0, ry1 = int(REGION_Y[0] * fh), int(REGION_Y[1] * fh)

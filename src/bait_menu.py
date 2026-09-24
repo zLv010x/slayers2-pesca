@@ -110,16 +110,22 @@ class BaitMenu:
     def open(self) -> None:
         """Abre o menu e deixa em Inventory → aba de itens (Fishing, ou All se a Fishing
         estiver escondida numa janela pequena). Lança MenuError se não conseguir."""
-        found = None
+        found, opened = None, False
         for _ in range(MENU_KEY_TRIES):   # o jogo às vezes ignora o primeiro M
             screen.tap_key(MENU_KEY)
             found = self._wait_inventory()
             if found is not None:
                 break
-        if found is None:
+            # abriu devagar (ou "Inventory" está coberto): outro M FECHARIA o menu
+            _, img, lines = self._read()
+            if self._menu_open(lines, img):
+                opened = True
+                break
+        if found is not None:
+            rect, _, inv = found
+            self._click(rect, inv)
+        elif not opened:
             raise MenuError("o menu não abriu com a tecla M")
-        rect, _, inv = found
-        self._click(rect, inv)
         for _ in range(TAB_TRIES):
             rect, img, lines = self._read()
             # a busca por nome funciona em qualquer aba: se a Fishing não aparece
