@@ -15,6 +15,7 @@ Segurança:
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,7 @@ MENU_KEY = "m"
 SEARCH_RX = r"item name here"
 INVENTORY_RX = r"\binventory$"   # o ícone ao lado às vezes vira uma letra ("O Inventory")
 FISHING_RX = r"^fishing\s*\("
+ALL_TAB_RX = r"^al[li1]\s*\("   # OCR lê "All (127)" como "Ali (127)"
 CLOSE_RX = r"close$"
 EQUIP_RX = r"equip\s*bait"
 FORBIDDEN_RX = re.compile(r"main menu|servers|back to", re.IGNORECASE)
@@ -46,6 +48,9 @@ BACKSPACE_GAP_SEC = 0.02
 WAIT_TYPED = 0.4
 TYPE_TRIES = 3
 TAB_TRIES = 3
+MENU_KEY_TRIES = 2
+MENU_OPEN_TIMEOUT = 3.0
+MENU_POLL = 0.4
 CLOSE_TRIES = 3
 
 
@@ -92,27 +97,44 @@ class BaitMenu:
                 or self._find(lines, INVENTORY_RX, img, LEFT_MENU_MAX_X) is not None)
 
     # ------------------------------------------------------------ navegação
+    def _wait_inventory(self):
+        """Espera o menu aparecer (às vezes demora). Devolve (rect, img, linha "Inventory") ou None."""
+        end = time.perf_counter() + MENU_OPEN_TIMEOUT
+        while True:
+            rect, img, lines = self._read()
+            inv = self._find(lines, INVENTORY_RX, img, LEFT_MENU_MAX_X)
+            if inv is not None or time.perf_counter() >= end:
+                return (rect, img, inv) if inv is not None else None
+            self.f.sleep(MENU_POLL)
+
     def open(self) -> None:
-        """Abre o menu e deixa em Inventory → Fishing. Lança MenuError se não conseguir."""
-        screen.tap_key(MENU_KEY)
-        self.f.sleep(WAIT_MENU)
-        rect, img, lines = self._read()
-        inv = self._find(lines, INVENTORY_RX, img, LEFT_MENU_MAX_X)
-        if inv is None:
+        """Abre o menu e deixa em Inventory → aba de itens (Fishing, ou All se a Fishing
+        estiver escondida numa janela pequena). Lança MenuError se não conseguir."""
+        found = None
+        for _ in range(MENU_KEY_TRIES):   # o jogo às vezes ignora o primeiro M
+            screen.tap_key(MENU_KEY)
+            found = self._wait_inventory()
+            if found is not None:
+                break
+        if found is None:
             raise MenuError("o menu não abriu com a tecla M")
+        rect, _, inv = found
         self._click(rect, inv)
         for _ in range(TAB_TRIES):
             rect, img, lines = self._read()
-            fishing = self._find(lines, FISHING_RX, img, TABS_MAX_X)
-            if fishing is None:
-                raise MenuError("não achei a aba Fishing")
-            if inventory.is_active_tab(img, fishing):
+            # a busca por nome funciona em qualquer aba: se a Fishing não aparece
+            # (lista de abas cortada em janela pequena), usa a All, que fica sempre no topo
+            tab = (self._find(lines, FISHING_RX, img, TABS_MAX_X)
+                   or self._find(lines, ALL_TAB_RX, img, TABS_MAX_X))
+            if tab is None:
+                raise MenuError("não achei a aba Fishing nem a All")
+            if inventory.is_active_tab(img, tab):
                 self.search_box = inventory.find_line(lines, SEARCH_RX)
                 if self.search_box is None:
                     raise MenuError("não achei a caixa de busca")
                 return
-            self._click(rect, fishing)
-        raise MenuError("a aba Fishing não ficou selecionada")
+            self._click(rect, tab)
+        raise MenuError(f"a aba {tab.text!r} não ficou selecionada")
 
     def close(self) -> None:
         """Limpa a busca e fecha o menu, conferindo que fechou mesmo."""

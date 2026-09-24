@@ -322,9 +322,11 @@ class App(ctk.CTk):
             h, w = rgb.shape[:2]
             scale = min(1.0, SNAPSHOT_MAX_H / max(h, 1))
             image = ctk.CTkImage(Image.fromarray(rgb), size=(max(1, int(w * scale)), max(1, int(h * scale))))
-        self._snapshot = image
+        # Troca primeiro a imagem na tela e só depois solta a antiga: soltar antes apaga a
+        # imagem que o rótulo ainda usa ("image pyimage.. doesn't exist").
         self.session_tab.show_last(image, f"  {item.name}  x{item.quantity}")
         self.session_tab.last_img.configure(text_color=RARITY_HEX.get(item.rarity, "#ffffff"))
+        self._snapshot = image
 
     # ------------------------------------------------------------ calibração
     def _game_rect(self) -> window.Rect | None:
