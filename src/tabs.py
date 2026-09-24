@@ -118,7 +118,7 @@ class SessionTab:
         self.show_recent.pack(side="right")
         ctk.CTkButton(head, text="Abrir logs", width=90, height=24, fg_color="#374151",
                       command=app.open_logs).pack(side="right", padx=8)
-        ctk.CTkButton(head, text="Zerar", width=60, height=24, fg_color="#374151",
+        ctk.CTkButton(head, text="Resetar", width=70, height=24, fg_color="#374151",
                       command=app.new_session).pack(side="right")
         if app.cfg["ui"].get("show_recent", True):
             self.show_recent.select()

@@ -48,6 +48,8 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
   se estiver cobrindo os avisos dos itens, a barra, a hotbar ou a bússola).
 - **Histórico** (aba Sessão): cada etiqueta de raridade liga/desliga aquela raridade na lista. Desligar
   só esconde: os drops continuam guardados e voltam quando você liga de novo.
+- **A sessão fica guardada** (histórico, contagens, tempo e iscas gastas), mesmo fechando a macro, até
+  você clicar em **Resetar** na aba Sessão. O CSV de cada sessão continua em `logs/`.
 - **Item acompanhado** (aba Discord, padrão "Ore"): total só desse item na sessão (o Ore mythic;
   Refinement Ore é outro item), mostrado na janela e em todo aviso do Discord.
 - Registra tudo em `logs/macro.log` e salva um print em `logs/evidencias/` quando algo dá errado.

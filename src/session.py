@@ -1,7 +1,12 @@
-"""Contagem da sessão: tempo rodando, itens pegos e um CSV para conferir depois."""
+"""Contagem da sessão: tempo rodando, itens pegos e um CSV para conferir depois.
+
+A sessão fica guardada em disco (state_path) a cada item: fechar e abrir a macro continua de
+onde parou. Só o botão Resetar apaga (forget) e começa do zero."""
 from __future__ import annotations
 
 import csv
+import json
+import os
 import threading
 import time
 from collections import Counter
@@ -14,6 +19,7 @@ import logbook
 # Quantos itens ficam no histórico da tela (o CSV guarda todos). Folgado para uma noite
 # inteira (~2000 drops): o filtro por raridade precisa achar os mythic antigos.
 MAX_RECENT = 20_000
+STATE_VERSION = 1
 
 
 def format_elapsed(seconds: float) -> str:
@@ -26,6 +32,7 @@ def format_elapsed(seconds: float) -> str:
 @dataclass
 class Session:
     log_dir: Path | None = None
+    state_path: Path | None = None                         # onde a sessão fica guardada
     counts: Counter = field(default_factory=Counter)      # nome -> quantidade somada
     rarities: Counter = field(default_factory=Counter)    # raridade -> nº de drops
     catches: int = 0                                       # nº de drops (cada coleta = 1)
@@ -53,6 +60,7 @@ class Session:
             if self._run_start is not None:
                 self._active_sec += time.monotonic() - self._run_start
                 self._run_start = None
+        self._save_state()
 
     def elapsed_seconds(self) -> float:
         """Só o tempo em que a macro estava pescando (parado não conta)."""
@@ -77,6 +85,7 @@ class Session:
             self.last.insert(0, (now.strftime("%H:%M:%S"), name, quantity, rarity))
             del self.last[MAX_RECENT:]
         self._append_csv(now, name, quantity, rarity)
+        self._save_state()
 
     def recent(self, rarities: set[str] | None, limit: int | None = None) -> list[tuple[str, str, int, str]]:
         """Histórico (mais novo primeiro) só das raridades visíveis; None = todas. O filtro só
@@ -88,10 +97,70 @@ class Session:
     def record_miss(self) -> None:
         with self._lock:
             self.misses += 1
+        self._save_state()
 
     def record_bait(self, name: str) -> None:
         with self._lock:
             self.baits_used[name] += 1
+        self._save_state()
+
+    # ------------------------------------------------------------ guardar até resetar
+    @classmethod
+    def load(cls, log_dir: Path | None, state_path: Path | None) -> "Session":
+        """Sessão guardada (a de antes de fechar a macro) ou uma nova, se não tiver."""
+        s = cls(log_dir=log_dir, state_path=state_path)
+        if state_path is None or not state_path.exists():
+            return s
+        try:
+            data = json.loads(state_path.read_text(encoding="utf-8"))
+            s._restore(data)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            logbook.get().warning("Sessão guardada estragada (%s): começando do zero", exc)
+            try:
+                state_path.replace(state_path.with_name(state_path.name + ".bak"))
+            except OSError:
+                pass
+            return cls(log_dir=log_dir, state_path=state_path)
+        return s
+
+    def _restore(self, data: dict) -> None:
+        if data.get("version") != STATE_VERSION:
+            raise ValueError(f"versão {data.get('version')!r}")
+        self.counts = Counter({str(k): int(v) for k, v in data["counts"].items()})
+        self.rarities = Counter({str(k): int(v) for k, v in data["rarities"].items()})
+        self.baits_used = Counter({str(k): int(v) for k, v in data.get("baits_used", {}).items()})
+        self.catches, self.misses = int(data["catches"]), int(data["misses"])
+        self.last = [(str(h), str(n), int(q), str(r)) for h, n, q, r in data["last"]][:MAX_RECENT]
+        self._active_sec = max(0.0, float(data.get("active_sec", 0.0)))
+        csv_path = data.get("csv")
+        self._csv_path = Path(csv_path) if csv_path and Path(csv_path).exists() else None
+
+    def _save_state(self) -> None:
+        """Guarda a sessão (atômico). Disco travado não pode derrubar o registro do item."""
+        if self.state_path is None:
+            return
+        with self._lock:
+            data = {
+                "version": STATE_VERSION, "counts": dict(self.counts), "rarities": dict(self.rarities),
+                "catches": self.catches, "misses": self.misses, "baits_used": dict(self.baits_used),
+                "last": [list(row) for row in self.last], "active_sec": self.elapsed_seconds(),
+                "csv": str(self._csv_path) if self._csv_path else None,
+            }
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_path.with_name(self.state_path.name + ".tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, self.state_path)
+        except OSError as exc:
+            logbook.get().warning("Não consegui guardar a sessão: %s", exc)
+
+    def forget(self) -> None:
+        """Resetar: apaga a sessão guardada (o CSV de cada sessão continua em logs/)."""
+        if self.state_path is not None:
+            try:
+                self.state_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logbook.get().warning("Não consegui apagar a sessão guardada: %s", exc)
 
     def overlay_snapshot(self) -> tuple[str, Counter, Counter]:
         """Tempo, itens e iscas gastas (cópias: o overlay lê na thread da interface)."""

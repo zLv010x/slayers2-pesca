@@ -159,3 +159,54 @@ def test_ore_conta_so_o_item_ore():
     for name in ("Refinement Ore", "Refinement Ore", "Ore", "ore"):
         s.record(name, 1, "rare")
     assert s.total_of("Ore") == 2
+
+
+# ---------------------------------------------------------------- guardar até resetar (24/09)
+def test_sessao_continua_depois_de_fechar_e_abrir(tmp_path, monkeypatch):
+    """Pedido de 24/09: guarda tudo (histórico, contagens, tempo, iscas) até clicar em Resetar."""
+    import session as mod
+    agora = [100.0]
+    monkeypatch.setattr(mod.time, "monotonic", lambda: agora[0])
+    state = tmp_path / "sessao-atual.json"
+    s = Session(log_dir=tmp_path, state_path=state)
+    s.start()
+    s.record("Ore", 1, "mythic")
+    s.record("Coral", 1, "common")
+    s.record_miss()
+    s.record_bait("Worm")
+    agora[0] = 160.0
+    s.pause()
+    again = Session.load(log_dir=tmp_path, state_path=state)
+    assert [n for _, n, _, _ in again.recent(None)] == ["Coral", "Ore"]
+    assert again.total_of("Ore") == 1 and again.catches == 2 and again.misses == 1
+    assert again.rarities == {"mythic": 1, "common": 1} and again.baits_used == {"Worm": 1}
+    assert again.elapsed_seconds() == 60
+    again.record("Coral", 1, "common")  # continua no mesmo CSV
+    assert len(list(tmp_path.glob("sessao-*.csv"))) == 1
+
+
+def test_resetar_apaga_o_que_foi_guardado(tmp_path):
+    state = tmp_path / "sessao-atual.json"
+    s = Session(log_dir=tmp_path, state_path=state)
+    s.record("Ore", 1, "mythic")
+    assert state.exists()
+    s.forget()
+    assert not state.exists()
+    fresh = Session.load(log_dir=tmp_path, state_path=state)
+    assert fresh.catches == 0 and fresh.recent(None) == []
+
+
+def test_arquivo_guardado_estragado_comeca_do_zero(tmp_path):
+    state = tmp_path / "sessao-atual.json"
+    state.write_text("{isso não é json", encoding="utf-8")
+    s = Session.load(log_dir=tmp_path, state_path=state)
+    assert s.catches == 0
+    assert (tmp_path / "sessao-atual.json.bak").exists()  # guarda o estragado para conferir
+
+
+def test_falha_ao_guardar_nao_derruba_o_registro(tmp_path, monkeypatch):
+    import session as mod
+    s = Session(log_dir=tmp_path, state_path=tmp_path / "sessao-atual.json")
+    monkeypatch.setattr(mod.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("travado")))
+    s.record("Ore", 1, "mythic")
+    assert s.catches == 1

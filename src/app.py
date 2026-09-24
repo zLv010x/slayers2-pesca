@@ -6,6 +6,7 @@ import os
 import queue
 import threading
 import tkinter as tk
+from tkinter import messagebox
 from typing import Callable
 
 import customtkinter as ctk
@@ -35,6 +36,7 @@ APP_ID = "zLv010x.Slayers2Pesca"
 ICON_FILE = config.ROOT / "assets" / "icone.ico"
 COMPASS_FILE = config.CALIBRATION_DIR / "bussola.npz"
 BAIT_FILE = config.CALIBRATION_DIR / "iscas.json"
+SESSION_FILE = config.LOG_DIR / "sessao-atual.json"
 SAVE_DELAY_MS = 400
 PUMP_MS = 30
 TICK_MS = 1000
@@ -63,7 +65,7 @@ class App(ctk.CTk):
         self.minsize(440, 640)
 
         self.cfg = config.load()
-        self.session = Session(log_dir=config.LOG_DIR)
+        self.session = Session.load(config.LOG_DIR, SESSION_FILE)  # continua a de antes de fechar
         self.compass = CompassLock()
         self.compass.load(COMPASS_FILE)
         self.catalog = Catalog(config.CATALOG_DIR, config.CATALOG_LOCAL_DIR)
@@ -426,14 +428,18 @@ class App(ctk.CTk):
                         "Não consegui setar o spawn: veja o log e sete na mão.")
 
     def new_session(self) -> None:
-        """Zera tempo e contagens (o CSV da sessão anterior continua salvo em logs/)."""
+        """Resetar: apaga histórico, contagens e tempo guardados (o CSV continua em logs/)."""
         if self._running:
-            self.set_status("Pare a pesca antes de zerar a sessão.")
+            self.set_status("Pare a pesca antes de resetar a sessão.")
             return
-        self.session = Session(log_dir=config.LOG_DIR)
+        if not messagebox.askyesno("Resetar sessão", "Apagar o histórico, as contagens e o tempo desta "
+                                   "sessão?\n\n(O CSV com todos os itens continua em logs/.)", parent=self):
+            return
+        self.session.forget()
+        self.session = Session(log_dir=config.LOG_DIR, state_path=SESSION_FILE)
         self.session_tab.reset()
         self._refresh_stats()
-        self.set_status("Sessão zerada.")
+        self.set_status("Sessão resetada: histórico e contagens apagados.")
 
     def _on_stopped(self, reason: str) -> None:
         self._running = False
