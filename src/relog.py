@@ -46,7 +46,7 @@ DEFAULTS: dict = {
     "server_mode": "vip",          # "vip" (servidor próprio) | "nick" (entra no de outro)
     "owner_nick": "",
     "map_name": "Ouwland",
-    "hold_join_sec": 2.0,
+    "hold_join_sec": 3.0,  # limite: solta assim que começa a carregar (leva < 1 s)
     "step_timeout_sec": 90,
     "total_timeout_sec": 600,
     "no_reconnect_codes": [264],
@@ -65,8 +65,6 @@ CARD_OFFSET_Y_FRAC = 0.230
 # "Private server owner" o OCR lê embaralhado (fonte clara/itálica): a posição vem
 # por deslocamento a partir do botão JOIN, que o OCR lê bem.
 OWNER_FIELD_DY_FRAC = 0.052
-# clicar "fora" do campo de nick antes de segurar o JOIN no modo VIP (ver docstring de Relogger)
-OUTSIDE_CLICK_DY_FRAC = 0.10
 # margem ao redor do dialog Disconnected pra separar a mensagem de texto de fundo
 DIALOG_PAD_X_FRAC = 0.09
 DIALOG_PAD_Y_FRAC = 0.05
@@ -389,14 +387,11 @@ class Relogger:
         return None
 
     def _join_vip(self, screen: Screen, frame: np.ndarray) -> None:
-        """Clica no campo de nick, clica fora dele (perde o foco) e segura o JOIN."""
-        if not screen.owner_field_pos or not screen.join_pos:
+        """Com VIP é só segurar o JOIN (o mundo já foi clicado): no meio da segurada ele
+        vira "JOIN PRIVATE" e entra no servidor privado da pessoa."""
+        if not screen.join_pos:
             return
-        a = self.actions
-        a.status("Servidor VIP: preparando o campo e segurando o JOIN.")
-        a.click(*screen.owner_field_pos)
-        ox, oy = screen.owner_field_pos
-        a.click(ox, int(oy - OUTSIDE_CLICK_DY_FRAC * frame.shape[0]))
+        self.actions.status("Servidor VIP: segurando o JOIN.")
         self._hold_join(*screen.join_pos)
 
     def _join_nick(self, screen: Screen) -> None:
@@ -415,8 +410,9 @@ class Relogger:
             a.click(*screen.join_private_pos)
 
     def _hold_join(self, x: int, y: int) -> None:
-        """Segura o JOIN olhando a tela: solta cedo se ela mudar, e sempre solta no final
-        (mesmo se algo der exceção no meio do caminho)."""
+        """Segura o JOIN até começar a carregar (ou até o limite). NÃO solta quando a tela
+        "muda": o botão vira JOIN PRIVATE no meio da segurada e soltar ali cancela a entrada.
+        Sempre solta no final, mesmo se algo der exceção no meio do caminho."""
         a = self.actions
         a.mouse_down(x, y)
         try:
@@ -424,7 +420,7 @@ class Relogger:
             while a.now() < deadline:
                 a.sleep(HOLD_POLL_SEC)
                 _, _, frame = a.grab()
-                if classify(frame, self.cfg).kind != "server_card":
+                if classify(frame, self.cfg).kind == "loading":
                     break
         finally:
             a.mouse_up()

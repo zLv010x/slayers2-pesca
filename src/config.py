@@ -87,7 +87,7 @@ DEFAULTS: dict = {
         "server_mode": "vip",          # "vip" = servidor privado próprio | "nick" = de outra pessoa
         "owner_nick": "",
         "map_name": "Ouwland",
-        "hold_join_sec": 2.0,
+        "hold_join_sec": 3.0,
         "step_timeout_sec": 90.0,
         "total_timeout_sec": 600.0,
         "settle_sec": 8.0,

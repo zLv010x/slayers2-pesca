@@ -12,6 +12,11 @@ CARD_POS = (390, 430)
 OWNER_POS = (960, 877)
 JOIN_POS = (960, 930)
 JOIN_PRIVATE_POS = (960, 900)
+# VIP de verdade (vídeo do usuário): segurando o JOIN, o botão vira "JOIN PRIVATE" (o OCR
+# pode nem ler, dourado) e depois de ~0,8 s começa a carregar; soltar antes cancela.
+VIP_TEXT_CHANGE_SEC = 0.4
+VIP_LOAD_SEC = 0.8
+LOAD_TO_GAME_SEC = 1.0
 
 # Telas falsas: a chave é o "frame" que FakeGame devolve (só o nome do estado).
 SCREENS = {
@@ -33,8 +38,7 @@ def _fake_classify(frame, cfg=None):
 
 
 class FakeFrame(str):
-    """String (nome do estado) que também parece um frame de verdade (`.shape`),
-    já que _join_vip usa a altura do frame para calcular o ponto de "clicar fora"."""
+    """String (nome do estado) que também parece um frame de verdade (`.shape`)."""
     shape = (1004, 1918, 3)
 
 
@@ -68,9 +72,20 @@ class FakeGame:
         self.status_msgs: list[str] = []
         self.in_game_calls = 0
         self.clock = FakeClock()
+        self._hold_start: float | None = None
+        self._loaded_at: float | None = None
 
     # --- interface `actions` esperada pelo Relogger ---------------------------
     def grab(self):
+        now = self.clock.now()
+        if self._hold_start is not None and self.server_mode == "vip":
+            held = now - self._hold_start
+            if held >= VIP_LOAD_SEC:
+                self.kind, self._loaded_at = "loading", now
+            elif held >= VIP_TEXT_CHANGE_SEC:
+                self.kind = "join_private_segurando"  # tela que o classify não reconhece
+        elif self.kind == "loading" and self._loaded_at is not None and now - self._loaded_at >= LOAD_TO_GAME_SEC:
+            self.kind = "ingame"
         return 0, 0, FakeFrame(self.kind)
 
     def click(self, x: int, y: int) -> None:
@@ -91,11 +106,14 @@ class FakeGame:
 
     def mouse_down(self, x: int, y: int) -> None:
         self.mouse_events.append(("down", x, y, self.clock.now()))
+        if self.kind.startswith("server_card") and (x, y) == JOIN_POS:
+            self._hold_start = self.clock.now()
 
     def mouse_up(self) -> None:
         self.mouse_events.append(("up", self.clock.now()))
-        if self.kind.startswith("server_card") and self.server_mode == "vip":
-            self.kind = "ingame"
+        if self._hold_start is not None and self.kind != "loading":
+            self.kind = "server_card"  # soltou antes de carregar: o jogo cancela
+        self._hold_start = None
 
     def type_text(self, text: str) -> None:
         self.typed.append(text)
@@ -132,16 +150,37 @@ def _cfg(**over):
 
 def test_fluxo_vip_a_partir_do_disconnected():
     game = FakeGame(start="disconnected", server_mode="vip")
-    cfg = _cfg(server_mode="vip", hold_join_sec=2.0)
+    cfg = _cfg(server_mode="vip", hold_join_sec=3.0)
     result = Relogger(cfg, game).run()
     assert result.ok and result.reason == "ok"
-    outside_pos = (OWNER_POS[0], int(OWNER_POS[1] - relog.OUTSIDE_CLICK_DY_FRAC * FakeFrame.shape[0]))
-    assert game.clicks == [RECONNECT_POS, PLAY_POS, CARD_POS, OWNER_POS, outside_pos]
+    # com VIP é só clicar no mundo e segurar o JOIN (sem mexer no campo do nick)
+    assert game.clicks == [RECONNECT_POS, PLAY_POS, CARD_POS]
     downs = [e for e in game.mouse_events if e[0] == "down"]
     ups = [e for e in game.mouse_events if e[0] == "up"]
     assert len(downs) == 1 and len(ups) == 1
-    assert ups[0][1] - downs[0][3] >= cfg["hold_join_sec"]
+    held = ups[0][1] - downs[0][3]
+    assert VIP_LOAD_SEC <= held < cfg["hold_join_sec"]  # soltou quando carregou, não antes nem no limite
     assert game.in_game_calls >= 1
+
+
+def test_vip_nao_solta_quando_o_botao_vira_join_private():
+    """Revisão de 24/09: soltar quando a tela "mudava" cancelava a entrada, porque o
+    botão vira JOIN PRIVATE no meio da segurada."""
+    game = FakeGame(start="server_card", server_mode="vip")
+    relogger = Relogger(_cfg(server_mode="vip", hold_join_sec=3.0), game)
+    relogger._hold_join(*JOIN_POS)
+    assert game.kind == "loading"
+
+
+def test_vip_solta_no_limite_se_nunca_carregar():
+    class NeverLoads(FakeGame):
+        def grab(self):
+            return 0, 0, FakeFrame("join_private_segurando")
+    game = NeverLoads(start="server_card", server_mode="vip")
+    relogger = Relogger(_cfg(server_mode="vip", hold_join_sec=3.0), game)
+    relogger._hold_join(*JOIN_POS)
+    down, up = game.mouse_events
+    assert up[1] - down[3] >= 3.0
 
 
 def test_fluxo_nick_a_partir_do_menu_pula_o_reconnect():
