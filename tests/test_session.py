@@ -1,4 +1,53 @@
+import sys
+import threading
+
 from session import Session, format_elapsed
+
+
+def test_record_e_total_of_em_threads_diferentes_nao_derruba(tmp_path):
+    """A pesca grava itens numa thread enquanto a interface lê a cada 1s (SessionTab.refresh):
+    não pode dar RuntimeError de dicionário mudando de tamanho durante a leitura."""
+    original = sys.getswitchinterval()
+    sys.setswitchinterval(1e-5)  # força troca de thread com muito mais frequência
+    try:
+        s = Session(log_dir=tmp_path)
+        errors = []
+
+        def escrever():
+            for i in range(3000):
+                s.record(f"Item {i}", 1, "common")
+
+        def ler():
+            for _ in range(3000):
+                try:
+                    s.total_of("Item 1")
+                    s.recent(set())
+                except RuntimeError as exc:
+                    errors.append(exc)
+
+        t1 = threading.Thread(target=escrever)
+        t2 = threading.Thread(target=ler)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        assert errors == []
+    finally:
+        sys.setswitchinterval(original)
+
+
+def test_erro_ao_gravar_csv_nao_derruba_o_registro(tmp_path):
+    """Se o disco falhar (OneDrive/antivírus travando o arquivo), o item não pode se perder:
+    a contagem da sessão precisa continuar valendo mesmo sem conseguir gravar o CSV."""
+    s = Session(log_dir=tmp_path)
+
+    class BoomPath:
+        def open(self, *a, **kw):
+            raise OSError("arquivo travado")
+
+    s._csv_path = BoomPath()
+    s.record("Ore", 1, "common")  # não pode levantar
+    assert s.catches == 1 and s.total_of("ore") == 1
 
 
 def test_formata_tempo():

@@ -47,6 +47,10 @@ ADVANCED_FIELDS = {
         ("rod_retries", "Tentativas de equipar vara", "Se não equipar depois disso, para e avisa."),
         ("max_failed_casts", "Lançamentos sem peixe seguidos", "Passou disso, conta como problema (caiu na água?)."),
         ("max_recoveries", "Problemas seguidos até desistir", "Recuperações seguidas sem pegar peixe antes de parar."),
+        ("auto_restart_wait_min", "Reiniciar sozinho após (min)",
+         "Se a pesca parar sozinha (não foi F1/botão/fechar), tenta de novo depois desse tempo. 0 desliga."),
+        ("max_restarts_per_hour", "Reinícios por hora (máx.)",
+         "Depois de tentar reiniciar sozinha esse tanto de vezes numa hora, só avisa e espera você."),
     ],
     "tracking": [
         ("task_fps", "FPS do minigame", "Prints por segundo no minigame. Baixe se o PC travar."),

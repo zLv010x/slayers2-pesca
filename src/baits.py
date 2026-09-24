@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import logbook
 from session import format_elapsed
 
 # Média móvel do tempo de um ciclo (pesos: 90% histórico, 10% novo).
@@ -43,10 +44,14 @@ class BaitState:
 
     def save(self, path: Path) -> None:
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(asdict(self), indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(asdict(self), indent=2, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError as exc:
+            # disco travado (OneDrive/antivírus) não pode derrubar a pesca: só loga e segue.
+            logbook.get().warning("Não consegui salvar o estado das iscas: %s", exc)
 
     @property
     def checked(self) -> bool:

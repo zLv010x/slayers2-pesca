@@ -93,3 +93,12 @@ def test_publicar_junta_no_compartilhado_sem_contar_em_dobro(dirs):
 def test_indice_sobrevive_a_reabrir(dirs):
     Catalog(*dirs).record("Zebra Fish", "rare", IMG)
     assert Catalog(*dirs).resolve("zebra fish") == "Zebra Fish"
+
+
+def test_erro_ao_salvar_indice_local_nao_derruba_o_registro(dirs, monkeypatch):
+    """Disco travado (OneDrive/antivírus) não pode abortar o record() antes do Discord ser avisado."""
+    import catalog as catalog_mod
+    cat = Catalog(*dirs)
+    monkeypatch.setattr(catalog_mod, "_save_index", lambda path, items: (_ for _ in ()).throw(OSError("travado")))
+    rec = cat.record("Coral", "common", IMG)
+    assert rec.name == "Coral" and rec.first_time

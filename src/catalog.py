@@ -29,6 +29,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+import logbook
+
 INDEX_NAME = "itens.json"
 IMAGES_DIR = "imagens"
 # Nomes curtos erram fácil ("Ore" x "Core"): só corrige nomes com tamanho mínimo.
@@ -149,7 +151,12 @@ class Catalog:
                 local["image"] = self._save_image(self.local_dir, local["slug"], snapshot)
             best = self._votes(key).most_common(1)[0][0]
             local["rarity"] = best
-            _save_index(self.local_dir / INDEX_NAME, self.local)
+            try:
+                _save_index(self.local_dir / INDEX_NAME, self.local)
+            except OSError as exc:
+                # disco travado (OneDrive/antivírus) não pode abortar o registro antes do Discord
+                # ser avisado: só loga e segue (a próxima gravação bem-sucedida já corrige o arquivo).
+                logbook.get().warning("Não consegui salvar o catálogo local: %s", exc)
             corrected = fuzzy or normalize(name) != key
             return Recorded(canonical_name, best, first_time, corrected)
 
