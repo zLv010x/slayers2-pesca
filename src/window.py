@@ -43,6 +43,14 @@ def ensure_dpi_awareness() -> None:
         user32.SetProcessDPIAware()
 
 
+def set_app_id(app_id: str) -> None:
+    """Identidade própria na barra de tarefas (sem isso o Windows mostra o ícone do Python)."""
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(app_id))
+    except (AttributeError, OSError):
+        pass  # Windows antigo: fica o ícone do Python, a macro funciona igual
+
+
 def _process_name(hwnd: int) -> str:
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))

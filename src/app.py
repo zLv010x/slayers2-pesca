@@ -5,6 +5,7 @@ import copy
 import os
 import queue
 import threading
+import tkinter as tk
 from typing import Callable
 
 import customtkinter as ctk
@@ -25,6 +26,8 @@ from session import Session
 from tabs import MUTED, RARITY_HEX, AdvancedTab, DiscordTab, SessionTab, SetupTab
 from webhook import DiscordNotifier
 
+APP_ID = "zLv010x.Slayers2Pesca"
+ICON_FILE = config.ROOT / "assets" / "icone.ico"
 COMPASS_FILE = config.CALIBRATION_DIR / "bussola.npz"
 BAIT_FILE = config.CALIBRATION_DIR / "iscas.json"
 SAVE_DELAY_MS = 400
@@ -47,6 +50,7 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.title("Slayers 2 • Pesca")
+        self._set_icon()
         self.geometry("470x760")
         self.minsize(440, 640)
 
@@ -79,6 +83,12 @@ class App(ctk.CTk):
         self.bind("<KeyPress>", self._on_key)
         self.after(PUMP_MS, self._pump)
         self.after(TICK_MS, self._tick)
+
+    def _set_icon(self) -> None:
+        try:
+            self.iconbitmap(default=str(ICON_FILE))  # default: vale também para as outras janelas
+        except tk.TclError as exc:
+            logbook.get().warning("Ícone não carregado (%s): %s", ICON_FILE, exc)
 
     # ------------------------------------------------------------ layout
     def _build(self) -> None:
@@ -476,6 +486,7 @@ def main() -> None:
     log = logbook.setup(config.LOG_DIR)
     log.info("Macro aberta.")
     window.ensure_dpi_awareness()
+    window.set_app_id(APP_ID)
     App().mainloop()
     log.info("Macro fechada.")
 
