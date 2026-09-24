@@ -158,6 +158,22 @@ def test_fluxo_nick_a_partir_do_menu_pula_o_reconnect():
     assert not any(e[0] == "down" for e in game.mouse_events)  # nick não segura JOIN
 
 
+def test_clique_no_menu_principal_respeita_cooldown_entre_leituras_iguais():
+    """3 leituras seguidas da mesma tela geram 1 clique só; depois do cooldown, clica de novo."""
+    game = FakeGame(start="main_menu", server_mode="vip")
+    relogger = Relogger(_cfg(), game)
+    screen, frame = SCREENS["main_menu"], FakeFrame("main_menu")
+    relogger._on_main_menu(screen, frame)
+    game.clock.sleep(1.0)
+    relogger._on_main_menu(screen, frame)
+    game.clock.sleep(1.0)
+    relogger._on_main_menu(screen, frame)
+    assert game.clicks == [PLAY_POS]
+    game.clock.sleep(relog.CLICK_COOLDOWN_SEC)
+    relogger._on_main_menu(screen, frame)
+    assert game.clicks == [PLAY_POS, PLAY_POS]
+
+
 def test_codigo_sem_reconexao_nao_clica_em_nada():
     game = FakeGame(start="disconnected_264", server_mode="vip")
     result = Relogger(_cfg(), game).run()
@@ -204,6 +220,74 @@ def test_timeout_total_vira_falha_com_motivo():
     result = Relogger(cfg, game).run()
     assert not result.ok
     assert result.reason == "timeout_total"
+
+
+class NeverConfirmsActions:
+    """in_game() sempre False: só sobra o "unknown" sustentado por settle_sec como
+    prova de que voltou ao jogo. A sequência de telas é fixa (não reage a clique);
+    o último item se repete indefinidamente."""
+
+    def __init__(self, sequence: list[str]):
+        self.sequence = sequence
+        self.idx = 0
+        self.clicks: list[tuple[int, int]] = []
+        self.mouse_events: list[tuple] = []
+        self.typed: list[str] = []
+        self.pressed: list[str] = []
+        self.status_msgs: list[str] = []
+        self.clock = FakeClock()
+
+    def grab(self):
+        frame = self.sequence[min(self.idx, len(self.sequence) - 1)]
+        self.idx += 1
+        return 0, 0, FakeFrame(frame)
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+
+    def mouse_down(self, x, y):
+        self.mouse_events.append(("down", x, y))
+
+    def mouse_up(self):
+        self.mouse_events.append(("up",))
+
+    def type_text(self, text):
+        self.typed.append(text)
+
+    def press(self, key):
+        self.pressed.append(key)
+
+    def sleep(self, sec):
+        self.clock.sleep(sec)
+
+    def now(self):
+        return self.clock.now()
+
+    def in_game(self, frame):
+        return False
+
+    def status(self, msg):
+        self.status_msgs.append(msg)
+
+
+def test_volta_ao_jogo_por_settle_apos_sequencia_de_telas_conhecidas():
+    # menu -> server_select -> server_card -> loading -> unknown (repete): sem in_game()
+    # confirmar, só conta como "ok" depois de settle_sec seguidos em tela desconhecida.
+    actions = NeverConfirmsActions(["main_menu", "server_select", "server_card", "loading", "unknown"])
+    cfg = _cfg(server_mode="nick", owner_nick="Fulano", settle_sec=1.0)
+    result = Relogger(cfg, actions).run()
+    assert result.ok and result.reason == "ok"
+    polls_ate_unknown = 4  # main_menu, server_select, server_card, loading
+    assert actions.idx >= polls_ate_unknown + round(1.0 / relog.POLL_SEC)
+
+
+def test_volta_ao_jogo_por_settle_desde_o_comeco():
+    # relog chamado com o jogo já normal: nunca passa por nenhuma tela conhecida.
+    actions = NeverConfirmsActions(["unknown"])
+    cfg = _cfg(settle_sec=1.0)
+    result = Relogger(cfg, actions).run()
+    assert result.ok and result.reason == "ok"
+    assert actions.idx >= round(1.0 / relog.POLL_SEC)
 
 
 def test_tela_carregando_so_avisa_e_continua_olhando():
