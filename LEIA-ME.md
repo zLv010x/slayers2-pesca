@@ -42,6 +42,14 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
 - **Overlay** por cima do jogo com o tempo de macro, o total de cada peixe e item e as iscas gastas.
   Fica em cima da party; com a pesca parada dá para arrastar. Liga/desliga e "Voltar para a party"
   em **Configurar → Janela**. Ele não aparece nos prints da macro e, pescando, o clique passa através dele.
+- **Parsec / OBS**: normalmente a janela da macro e o overlay somem de qualquer captura enquanto
+  pesca (pelo Parsec parece que minimizou). Ligue **Configurar → Janela → Aparecer no Parsec / OBS**
+  para vê-los; a macro se apaga dos próprios prints, então deixe a janela no canto esquerdo (ela avisa
+  se estiver cobrindo os avisos dos itens, a barra, a hotbar ou a bússola).
+- **Histórico** (aba Sessão): cada etiqueta de raridade liga/desliga aquela raridade na lista. Desligar
+  só esconde: os drops continuam guardados e voltam quando você liga de novo.
+- **Item acompanhado** (aba Discord, padrão "Ore"): soma todos os itens com essa palavra no nome
+  (Ore + Refinement Ore...) e mostra no Discord quanto veio de cada.
 - Registra tudo em `logs/macro.log` e salva um print em `logs/evidencias/` quando algo dá errado.
 - Não deixa o PC dormir nem a tela apagar enquanto está pescando.
 - Guarda tudo o que pegou em `logs/sessao-*.csv`.
@@ -51,6 +59,8 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
   - `catalogo_local/` é o **seu**: itens que ainda não estão no compartilhado entram aqui
     (uma imagem por item, sem repetir), junto com as suas contagens.
   - Item que não está em nenhum dos dois aparece no Discord como "Primeira vez no catálogo".
+  - Nome lido torto pelo OCR ("Clov.tn Fish", "Jzebra Fish", "Golden FEh") vira o item certo. Ao abrir,
+    a macro arruma o catálogo local: leituras erradas antigas entram no item certo e lixo sai.
   - Para mandar os itens novos para o compartilhado: `python src/catalog.py publicar`.
   - Se um nome entrar errado, corrija o `"name"` no `itens.json` e ponha a leitura errada em `"aliases"`.
 

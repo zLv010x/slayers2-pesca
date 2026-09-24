@@ -183,3 +183,56 @@ def test_segurar_join_sem_o_cursor_chegar_nao_aperta(monkeypatch):
     f = SimpleNamespace(mouse=SimpleNamespace(set=lambda on: pressed.append(on)))
     assert relog_bridge.RelogActions(f).mouse_down(10, 10) is False
     assert pressed == []
+
+
+def _fake_hidden(entered):
+    import contextlib
+
+    @contextlib.contextmanager
+    def hidden():
+        entered.append("in")
+        try:
+            yield
+        finally:
+            entered.append("out")
+    return hidden
+
+
+def test_modo_parsec_confere_o_menu_com_print_limpo(monkeypatch):
+    """O overlay fica em cima do PLAY do menu: com ele aparecendo nos prints (Parsec), a
+    conferência tira um print novo com a macro transparente."""
+    entered, seen = [], []
+    monkeypatch.setattr(relog_bridge.capture_mode, "active", lambda: True)
+    monkeypatch.setattr(relog_bridge.capture_mode, "hidden", _fake_hidden(entered))
+    monkeypatch.setattr(relog_bridge, "lost_game_screen",
+                        lambda img, cfg=None: seen.append((img, list(entered))))
+    f = SimpleNamespace(cfg=_cfg(), rect=lambda: Rect(0, 0, 10, 10),
+                        grabber=SimpleNamespace(grab=lambda r: "print limpo"))
+    assert relog_bridge.handle(f, "print com overlay") is False
+    assert seen == [("print limpo", ["in"])] and entered == ["in", "out"]
+
+
+def test_modo_normal_usa_o_print_que_ja_tinha(monkeypatch):
+    seen = []
+    monkeypatch.setattr(relog_bridge.capture_mode, "active", lambda: False)
+    monkeypatch.setattr(relog_bridge, "lost_game_screen", lambda img, cfg=None: seen.append(img))
+    f = SimpleNamespace(cfg=_cfg(), grabber=SimpleNamespace(grab=lambda r: pytest.fail("não devia tirar outro")))
+    assert relog_bridge.handle(f, "print") is False
+    assert seen == ["print"]
+
+
+def test_modo_parsec_seta_o_spawn_com_a_macro_transparente(monkeypatch):
+    entered = []
+    monkeypatch.setattr(relog_bridge.capture_mode, "active", lambda: True)
+    monkeypatch.setattr(relog_bridge.capture_mode, "hidden", _fake_hidden(entered))
+
+    class Spy:
+        def __init__(self, actions):
+            pass
+
+        def run(self):
+            entered.append("run")
+            return relog_bridge.spawn.SpawnResult(True, "ok")
+    monkeypatch.setattr(relog_bridge.spawn, "Setter", Spy)
+    assert relog_bridge.set_spawn(SimpleNamespace()).ok
+    assert entered == ["in", "run", "out"]

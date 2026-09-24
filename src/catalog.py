@@ -36,20 +36,48 @@ IMAGES_DIR = "imagens"
 # Nomes curtos erram fácil ("Ore" x "Core"): só corrige nomes com tamanho mínimo.
 FUZZY_MIN_LEN = 6
 FUZZY_CUTOFF = 0.88
+# Nome longo com tamanho quase igual aceita um pouco mais de diferença ("Golden FEh", "Crustadofi",
+# "KrathLtlon" ficam em 0,84). Tamanho bem diferente não: "Big Zebra Fish" seria outro item.
+FUZZY_CUTOFF_LONG = 0.84
+FUZZY_LONG_LEN = 8
+FUZZY_LONG_MAX_LEN_DIFF = 2
+FUZZY_MARGIN = 0.05          # dois nomes quase iguais ao lido: não chuta nenhum
+# Sujeira do ícone grudada antes do nome ("Jzebra Fish", "GNOuwFish", "8 N Metal Scraps").
+AFFIX_MIN_LEN = 6
+AFFIX_MAX_JUNK = 2
+TIDY_MAX_PASSES = 3
 SHARED_FIELDS = ("name", "slug", "image", "rarity", "rarity_votes", "aliases")
 # Nome de item tem pelo menos 3 letras ("Ore"): "6d" (prazo dos códigos no menu principal)
-# e textos da própria tela ("Collect", "item") não são itens.
+# e textos da própria tela ("Collect", "item", a etiqueta "NEW!") não são itens.
 MIN_NAME_LETTERS = 3
-IGNORED_NAMES = {"item", "collect"}
+IGNORED_NAMES = {"item", "collect", "new"}
+PROMPT_WORD = "collect"      # o botão "Collect" lido torto ("Cotlect", "lollect")
+PROMPT_CUTOFF = 0.8
+# Trocas típicas do OCR do Windows nesta fonte: o "w" vira "v.t", "vt.t", "v.r", "v•j", "vv".
+OCR_FIXES = (
+    (re.compile(r"v(?:t?[^\w\s]+[tjri]|v)", re.IGNORECASE), "w"),
+    (re.compile(r"\$"), "s"),
+    (re.compile(r"0"), "o"),
+    (re.compile(r"1"), "l"),
+)
 
 
 def normalize(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def fix_ocr(name: str) -> str:
+    for pattern, repl in OCR_FIXES:
+        name = pattern.sub(repl, name)
+    return name
+
+
 def plausible_name(name: str) -> bool:
     letters = re.sub(r"[^A-Za-z]", "", name)
-    return len(letters) >= MIN_NAME_LETTERS and name.strip().lower() not in IGNORED_NAMES
+    key = normalize(name)
+    if len(letters) < MIN_NAME_LETTERS or key in IGNORED_NAMES:
+        return False
+    return difflib.SequenceMatcher(None, key, PROMPT_WORD).ratio() < PROMPT_CUTOFF
 
 
 def slugify(name: str) -> str:
@@ -83,6 +111,27 @@ def _save_index(path: Path, items: dict[str, dict]) -> None:
     os.replace(tmp, path)
 
 
+def _affix_match(key: str, entries: dict[str, dict]) -> str | None:
+    """Nome conhecido com até AFFIX_MAX_JUNK letras de sujeira antes ("jzebrafish")."""
+    fits = [k for k in entries
+            if len(k) >= AFFIX_MIN_LEN and key.endswith(k) and 0 < len(key) - len(k) <= AFFIX_MAX_JUNK]
+    return max(fits, key=len, default=None)
+
+
+def _fuzzy_match(key: str, entries: dict[str, dict]) -> str | None:
+    if len(key) < FUZZY_MIN_LEN or not entries:
+        return None
+    scored = sorted(((difflib.SequenceMatcher(None, key, k).ratio(), k) for k in entries), reverse=True)
+    best, found = scored[0]
+    near_len = abs(len(key) - len(found)) <= FUZZY_LONG_MAX_LEN_DIFF
+    cutoff = FUZZY_CUTOFF_LONG if near_len and max(len(key), len(found)) >= FUZZY_LONG_LEN else FUZZY_CUTOFF
+    if best < cutoff:
+        return None
+    if len(scored) > 1 and best - scored[1][0] < FUZZY_MARGIN:
+        return None  # dois itens quase iguais ao que foi lido: não dá para saber qual
+    return found
+
+
 def _new_entry(name: str) -> dict:
     return {"name": name, "slug": slugify(name), "image": None, "rarity": None,
             "rarity_votes": {}, "aliases": []}
@@ -105,21 +154,27 @@ class Catalog:
     def _entries(self) -> dict[str, dict]:
         return {**self.local, **self.shared}
 
-    def _find(self, name: str) -> tuple[str | None, bool]:
-        """Chave do item para esse nome lido; bool = achou por aproximação."""
-        key = normalize(name)
-        if not key:
+    def _find(self, name: str, exclude: str | None = None) -> tuple[str | None, bool]:
+        """Chave do item para esse nome lido; bool = achou por aproximação.
+
+        Tenta o nome como veio e com as trocas típicas do OCR desfeitas, nesta ordem:
+        igual, apelido conhecido, sujeira do ícone antes do nome, parecido."""
+        keys = [k for k in dict.fromkeys((normalize(name), normalize(fix_ocr(name)))) if k]
+        if not keys:
             return None, False
-        entries = self._entries()
-        if key in entries:
-            return key, False
-        for k, entry in entries.items():
-            if key in {normalize(a) for a in entry.get("aliases", [])}:
-                return k, False
-        if len(key) >= FUZZY_MIN_LEN:
-            close = difflib.get_close_matches(key, list(entries), n=1, cutoff=FUZZY_CUTOFF)
-            if close:
-                return close[0], True
+        entries = {k: e for k, e in self._entries().items() if k != exclude}
+        for key in keys:
+            if key in entries:
+                return key, key != keys[0]
+        for key in keys:
+            for k, entry in entries.items():
+                if key in {normalize(a) for a in entry.get("aliases", [])}:
+                    return k, False
+        for match in (_affix_match, _fuzzy_match):
+            for key in keys:
+                found = match(key, entries)
+                if found:
+                    return found, True
         return None, False
 
     def _canonical(self, key: str) -> dict:
@@ -178,6 +233,105 @@ class Catalog:
         rel = f"{IMAGES_DIR}/{slug}.png"
         return rel if cv2.imwrite(str(folder / rel), snapshot) else None
 
+    # ------------------------------------------------------------ arrumar (só o local)
+    def tidy(self) -> list[tuple[str, str | None]]:
+        """Arruma o catálogo local com as regras de hoje: leitura errada de um item conhecido
+        entra no item certo (somando contagem e votos) e lixo do OCR sai, com a imagem.
+        Devolve [(nome antigo, nome certo ou None = apagado)]."""
+        changes: list[tuple[str, str | None]] = []
+        with self._lock:
+            for _ in range(TIDY_MAX_PASSES):  # juntar uma leitura pode destravar outra (dois parecidos)
+                done = self._tidy_pass()
+                changes += done
+                if not done:
+                    break
+            if changes:
+                try:
+                    _save_index(self.local_dir / INDEX_NAME, self.local)
+                except OSError as exc:
+                    logbook.get().warning("Não consegui salvar o catálogo local arrumado: %s", exc)
+        return changes
+
+    def _tidy_pass(self) -> list[tuple[str, str | None]]:
+        changes: list[tuple[str, str | None]] = []
+        # só o que não está no compartilhado; leituras raras primeiro, para entrarem no nome certo
+        order = sorted((k for k in self.local if k not in self.shared),
+                       key=lambda k: (self.local[k].get("count", 0), k))
+        for key in order:
+            entry = self.local.get(key)
+            if entry is None:
+                continue
+            name = entry.get("name", "")
+            if not plausible_name(name):
+                self._drop_local(key)
+                changes.append((name, None))
+                continue
+            target, _ = self._find(name, exclude=key)
+            if target is not None and self._can_absorb(target, key):
+                self._merge_local(key, target)
+                changes.append((name, self._canonical(target)["name"]))
+            elif target is None and self._is_partial(key):
+                self._drop_local(key)
+                changes.append((name, None))
+        return changes
+
+    def _is_partial(self, key: str) -> bool:
+        """Pedaço de um nome conhecido ("ouw" de OuwFish, "Fish"): leitura cortada, não item."""
+        return len(key) < FUZZY_MIN_LEN and any(
+            key in k for k in self._entries() if k != key and len(k) >= FUZZY_MIN_LEN)
+
+    def _can_absorb(self, target: str, key: str) -> bool:
+        """Só junta no nome mais visto; no empate, no mais completo (leitura cortada perde letras)."""
+        if target in self.shared:
+            return True
+        rank = lambda k: (self.local[k].get("count", 0), len(k))  # noqa: E731
+        return rank(target) > rank(key)
+
+    def _merge_local(self, src_key: str, dst_key: str) -> None:
+        src = self.local.pop(src_key)
+        dst = self.local.setdefault(dst_key, _new_entry(self._canonical_or(dst_key, src)["name"]))
+        dst["count"] = dst.get("count", 0) + src.get("count", 0)
+        dst["rarity_votes"] = dict(Counter(dst.get("rarity_votes", {})) + Counter(src.get("rarity_votes", {})))
+        for alias in [src.get("name", ""), *src.get("aliases", [])]:
+            if (alias and normalize(alias) != dst_key and alias not in dst["aliases"]
+                    and not self._is_known_alias(dst_key, alias)):
+                dst["aliases"].append(alias)
+        for field, pick in (("first_seen", min), ("last_seen", max)):
+            seen = [v for v in (dst.get(field), src.get(field)) if v]
+            if seen:
+                dst[field] = pick(seen)
+        votes = self._votes(dst_key)
+        if votes:
+            dst["rarity"] = votes.most_common(1)[0][0]
+        self._move_image(src, dst, dst_key)
+
+    def _canonical_or(self, key: str, fallback: dict) -> dict:
+        return self.shared.get(key) or self.local.get(key) or fallback
+
+    def _move_image(self, src: dict, dst: dict, dst_key: str) -> None:
+        """A imagem da leitura errada vira a do item certo se ele não tinha nenhuma; senão sai."""
+        if not src.get("image"):
+            return
+        path = self.local_dir / src["image"]
+        has_image = dst.get("image") or self.shared.get(dst_key, {}).get("image")
+        target = self.local_dir / IMAGES_DIR / f"{dst['slug']}.png"
+        try:
+            if not has_image and path.exists() and not target.exists():
+                path.replace(target)
+                dst["image"] = f"{IMAGES_DIR}/{target.name}"
+            else:
+                path.unlink(missing_ok=True)
+        except OSError as exc:
+            logbook.get().warning("Não consegui mexer na imagem %s: %s", path.name, exc)
+
+    def _drop_local(self, key: str) -> None:
+        entry = self.local.pop(key)
+        if entry.get("image"):
+            try:
+                (self.local_dir / entry["image"]).unlink(missing_ok=True)
+            except OSError as exc:
+                logbook.get().warning("Não consegui apagar a imagem %s: %s", entry["image"], exc)
+
     # ------------------------------------------------------------ publicar
     def publish(self) -> list[str]:
         """Junta o catálogo local no compartilhado. Devolve os itens novos no compartilhado."""
@@ -213,5 +367,7 @@ if __name__ == "__main__":
     root = Path(__file__).resolve().parent.parent
     if sys.argv[1:] != ["publicar"]:
         sys.exit("uso: python src/catalog.py publicar")
-    new = Catalog(root / "catalogo", root / "catalogo_local").publish()
+    cat = Catalog(root / "catalogo", root / "catalogo_local")
+    cat.tidy()  # leituras erradas antigas entram no item certo antes de ir para os amigos
+    new = cat.publish()
     print(f"{len(new)} item(ns) novo(s) no catálogo compartilhado: {', '.join(new) or '-'}")

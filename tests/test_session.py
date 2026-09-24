@@ -21,7 +21,7 @@ def test_record_e_total_of_em_threads_diferentes_nao_derruba(tmp_path):
             for _ in range(3000):
                 try:
                     s.total_of("Item 1")
-                    s.recent(set())
+                    s.recent(None)
                 except RuntimeError as exc:
                     errors.append(exc)
 
@@ -104,7 +104,8 @@ def test_filtro_do_historico_por_raridade():
     s.record("Flame Scarf", 1, "mythic")
     assert [n for _, n, _, _ in s.recent({"mythic"})] == ["Flame Scarf", "Black Dragon Armour"]
     assert [n for _, n, _, _ in s.recent({"mythic", "rare"})] == ["Flame Scarf", "Golden Fish", "Black Dragon Armour"]
-    assert len(s.recent(set())) == 4          # nada selecionado = mostra tudo
+    assert len(s.recent(None)) == 4           # sem filtro = mostra tudo
+    assert s.recent(set()) == []              # todas as raridades desligadas = nada
     assert s.recent({"legendary"}) == []
 
 
@@ -129,3 +130,34 @@ def test_iscas_gastas_por_tipo_e_snapshot_e_copia():
     counts["Clown Fish"] = 99
     baits["Worm"] = 99
     assert s.counts["Clown Fish"] == 2 and s.baits_used["Worm"] == 2
+
+
+def test_desligar_raridades_esconde_mas_nao_perde_os_drops():
+    """Pedido de 24/09: desligou tudo menos mythic, voltou a pescar e esqueceu: os drops
+    escondidos continuam guardados e aparecem quando a raridade é ligada de novo."""
+    s = Session()
+    visible = {"mythic"}
+    s.record("Coral", 1, "common")
+    s.record("Ore", 1, "mythic")
+    s.record("Clown Fish", 1, "rare")
+    assert [n for _, n, _, _ in s.recent(visible)] == ["Ore"]
+    assert [n for _, n, _, _ in s.recent(visible | {"rare", "common"})] == ["Clown Fish", "Ore", "Coral"]
+
+
+def test_historico_guarda_a_noite_inteira():
+    """Antes guardava só os 500 últimos: numa noite (~2000 drops) os mythic antigos sumiam."""
+    s = Session()
+    s.record("Ore", 1, "mythic")
+    for _ in range(3000):
+        s.record("Coral", 1, "common")
+    assert [n for _, n, _, _ in s.recent({"mythic"})] == ["Ore"]
+
+
+def test_item_acompanhado_soma_todos_com_a_palavra_no_nome():
+    """Pedido de 24/09: "Ore" ficava 0 com 17 Refinement Ore (só contava o nome exato)."""
+    s = Session()
+    for name in ("Refinement Ore", "Refinement Ore", "Ore", "Golden Fish", "Coral", "Orecchio"):
+        s.record(name, 1, "rare")
+    assert s.tracked_breakdown("ore") == {"Refinement Ore": 2, "Ore": 1}
+    assert s.tracked_breakdown("") == {}
+    assert s.total_of("Ore") == 1  # o total do próprio item continua exato

@@ -31,7 +31,7 @@ FONT_TITLE = ("Segoe UI Semibold", 12)
 log = logbook.get()
 
 # Peixes que não têm "fish" no nome (Krathulon e Crustadon são os lendários da missão do Isao).
-FISH_NAMES = {"krathulon", "crustadon", "seahorse"}
+FISH_NAMES = {"krathulon", "crustadon", "seahorse", "ouwfwesh"}
 
 
 class Line(NamedTuple):
@@ -119,7 +119,8 @@ class Overlay(tk.Toplevel):
     """Só mostra; quem decide o conteúdo e a hora de atualizar é o app (`refresh`/`follow`)."""
 
     def __init__(self, master, get_rect: Callable[[], Rect | None],
-                 on_moved: Callable[[dict], None], zone: dict, pos: dict | None) -> None:
+                 on_moved: Callable[[dict], None], zone: dict, pos: dict | None,
+                 capture_hidden: bool = True) -> None:
         super().__init__(master)
         self.withdraw()
         self.title("Slayers 2 • Overlay")
@@ -136,6 +137,7 @@ class Overlay(tk.Toplevel):
         self._drag: tuple[int, int] | None = None
         self._clickthrough = False
         self._visible = False
+        self._capture_hidden = capture_hidden
         self._body = tk.Frame(self, bg=BG, padx=10, pady=6)
         self._body.pack()
         self._bind_drag(self)
@@ -147,12 +149,17 @@ class Overlay(tk.Toplevel):
         self.attributes("-alpha", 0.0)
         self.deiconify()
         self.update_idletasks()
-        if not window.set_capture_excluded(self, True):
-            log.warning("Overlay: não deu para esconder dos prints (Windows antigo?)")
+        self.set_capture_hidden(self._capture_hidden)
         if not window.set_overlay_style(self, clickthrough=False):
             log.warning("Overlay: não deu para aplicar o estilo (pode roubar foco)")
         window.show_no_activate(self, False)
         self.attributes("-alpha", ALPHA)
+
+    def set_capture_hidden(self, on: bool) -> None:
+        """True = invisível em qualquer captura; False = aparece no Parsec/OBS (modo Parsec)."""
+        self._capture_hidden = on
+        if not window.set_capture_excluded(self, on) and on:
+            log.warning("Overlay: não deu para esconder dos prints (Windows antigo?)")
 
     # ------------------------------------------------------------ conteúdo
     def refresh(self, lines: list[Line]) -> None:

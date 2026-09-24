@@ -93,8 +93,9 @@ class SessionTab:
         self.app = app
         chips = ctk.CTkFrame(parent, fg_color="transparent")
         chips.pack(fill="x", pady=(6, 4))
-        # Etiquetas de raridade = filtro do histórico (nenhuma marcada = mostra tudo).
-        self.filter: set[str] = set()
+        # Etiquetas de raridade = filtro do histórico: clicar liga/desliga. Só esconde da
+        # lista; os drops continuam guardados e voltam quando a raridade é ligada de novo.
+        self.hidden: set[str] = set()
         self.chips: dict[str, ctk.CTkButton] = {}
         for rarity in RARITY_ORDER:
             chip = ctk.CTkButton(chips, text="0", height=26, width=40, corner_radius=13,
@@ -138,14 +139,14 @@ class SessionTab:
             self.app.save_soon()
 
     def toggle_filter(self, rarity: str) -> None:
-        self.filter ^= {rarity}
+        self.hidden ^= {rarity}
         self._shown = -1  # força redesenhar a lista
         self.refresh()
 
     def _paint_chips(self) -> None:
         s = self.app.session
         for rarity, chip in self.chips.items():
-            on = not self.filter or rarity in self.filter
+            on = rarity not in self.hidden
             color = RARITY_HEX[rarity]
             chip.configure(text=f"{webhook.RARITY_LABELS[rarity]} {s.rarities.get(rarity, 0)}",
                            fg_color=color if on else CHIP_OFF, hover_color=color,
@@ -160,11 +161,17 @@ class SessionTab:
         for r in self._rows:
             r.destroy()
         self._rows = []
-        rows = s.recent(self.filter, RECENT_ROWS)
+        visible = {r for r in RARITY_ORDER if r not in self.hidden}
+        rows = s.recent(visible if self.hidden else None, RECENT_ROWS)
         if not rows:
-            chosen = ", ".join(webhook.RARITY_LABELS[r] for r in RARITY_ORDER if r in self.filter)
-            empty = ctk.CTkLabel(self.recent, text_color=MUTED,
-                                 text=f"Nenhum item {chosen} nesta sessão." if chosen else "Nada ainda.")
+            if not visible:
+                text = "Todas as raridades desligadas: clique numa etiqueta para mostrar."
+            elif self.hidden:
+                chosen = ", ".join(webhook.RARITY_LABELS[r] for r in RARITY_ORDER if r in visible)
+                text = f"Nenhum item {chosen} nesta sessão."
+            else:
+                text = "Nada ainda."
+            empty = ctk.CTkLabel(self.recent, text_color=MUTED, text=text)
             empty.pack(pady=8)
             self._rows.append(empty)
         for hora, name, qty, rarity in rows:
@@ -285,6 +292,14 @@ class SetupTab:
                       command=app.reset_overlay).pack(side="right")
         hint(box, "Mostra tempo, peixes, itens e iscas gastas. Arraste para mudar de lugar "
                   "(com a pesca parada; pescando, os cliques passam através dele).")
+        r = row(box)
+        self.in_capture = ctk.CTkSwitch(r, text="Aparecer no Parsec / OBS", command=self._save_in_capture)
+        self.in_capture.pack(side="left")
+        if cfg["ui"].get("show_in_capture", False):
+            self.in_capture.select()
+        hint(box, "Desligado, a janela e o overlay somem de qualquer captura enquanto pesca (no Parsec "
+                  "parece que minimizou). Ligado, aparecem; a macro se apaga dos próprios prints, então "
+                  "deixe a janela no canto esquerdo, longe do meio da tela, da barra e da hotbar.")
         hint(box, "No Roblox: desligue Screen Shake e Shift Lock, senão a câmera mexe durante a pesca.")
         self.refresh()
 
@@ -328,6 +343,11 @@ class SetupTab:
     def _save_overlay(self) -> None:
         self.app.cfg["ui"]["overlay"] = bool(self.overlay_on.get())
         self.app.apply_overlay()
+        self.app.save_soon()
+
+    def _save_in_capture(self) -> None:
+        self.app.cfg["ui"]["show_in_capture"] = bool(self.in_capture.get())
+        self.app.apply_capture_mode()
         self.app.save_soon()
 
     def _save_on_top(self) -> None:

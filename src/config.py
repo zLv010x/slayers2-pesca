@@ -95,7 +95,8 @@ DEFAULTS: dict = {
         "no_reconnect_codes": [264],   # 264 = a conta entrou de outro PC: reconectar derrubaria
     },
     "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True,
-           "overlay": True, "overlay_pos": None},
+           "overlay": True, "overlay_pos": None,
+           "show_in_capture": False},  # aparecer no Parsec/OBS (a macro se apaga dos próprios prints)
     "config_rev": 3,
 }
 CONFIG_REV = DEFAULTS["config_rev"]

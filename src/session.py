@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import threading
 import time
 from collections import Counter
@@ -11,8 +12,9 @@ from pathlib import Path
 
 import logbook
 
-# Quantos itens ficam no histórico da tela (o CSV guarda todos).
-MAX_RECENT = 500
+# Quantos itens ficam no histórico da tela (o CSV guarda todos). Folgado para uma noite
+# inteira (~2000 drops): o filtro por raridade precisa achar os mythic antigos.
+MAX_RECENT = 20_000
 
 
 def format_elapsed(seconds: float) -> str:
@@ -67,6 +69,16 @@ class Session:
         with self._lock:
             return sum(q for n, q in self.counts.items() if n.lower() == key)
 
+    def tracked_breakdown(self, word: str) -> dict[str, int]:
+        """Itens com essa palavra no nome e quanto de cada ("Ore" -> Ore, Refinement Ore)."""
+        word = word.strip()
+        if not word:
+            return {}
+        pattern = re.compile(rf"\b{re.escape(word)}\b", re.IGNORECASE)
+        with self._lock:
+            found = {n: q for n, q in self.counts.items() if pattern.search(n)}
+        return dict(sorted(found.items(), key=lambda kv: -kv[1]))
+
     def record(self, name: str, quantity: int, rarity: str) -> None:
         now = datetime.now()
         with self._lock:
@@ -77,10 +89,11 @@ class Session:
             del self.last[MAX_RECENT:]
         self._append_csv(now, name, quantity, rarity)
 
-    def recent(self, rarities: set[str], limit: int | None = None) -> list[tuple[str, str, int, str]]:
-        """Histórico (mais novo primeiro) só das raridades escolhidas; conjunto vazio = todas."""
+    def recent(self, rarities: set[str] | None, limit: int | None = None) -> list[tuple[str, str, int, str]]:
+        """Histórico (mais novo primeiro) só das raridades visíveis; None = todas. O filtro só
+        esconde: tudo continua guardado e volta a aparecer quando a raridade é ligada."""
         with self._lock:
-            items = [row for row in self.last if not rarities or row[3] in rarities]
+            items = [row for row in self.last if rarities is None or row[3] in rarities]
         return items[:limit] if limit else items
 
     def record_miss(self) -> None:

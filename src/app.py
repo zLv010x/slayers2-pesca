@@ -13,6 +13,7 @@ import cv2
 import keyboard
 from PIL import Image
 
+import capture_mode
 import config
 import logbook
 import overlay
@@ -39,6 +40,7 @@ PUMP_MS = 30
 TICK_MS = 1000
 FOCUS_DELAY_MS = 350
 MINIMIZE_DELAY_MS = 150
+WARN_COVER_DELAY_MS = 1500  # depois de o Roblox vir para a frente
 CLOSE_WAIT_SEC = 3.0
 # Reinício automático na hora em que você marca ponto/atalho: tenta de novo depois disso.
 RESTART_RETRY_MS = 30_000
@@ -65,6 +67,7 @@ class App(ctk.CTk):
         self.compass = CompassLock()
         self.compass.load(COMPASS_FILE)
         self.catalog = Catalog(config.CATALOG_DIR, config.CATALOG_LOCAL_DIR)
+        self._tidy_catalog()
         self.baits = BaitState.load(BAIT_FILE)
         self._fisher: Fisher | None = None
         self._bait_check_pending = False
@@ -89,7 +92,8 @@ class App(ctk.CTk):
         self._roblox_hwnd: int | None = None
         self._overlay_failed = False
         self.overlay = overlay.Overlay(self, self._overlay_rect, self._overlay_moved,
-                                       config.PARTY_ZONE, self.cfg["ui"].get("overlay_pos"))
+                                       config.PARTY_ZONE, self.cfg["ui"].get("overlay_pos"),
+                                       capture_hidden=not self.cfg["ui"].get("show_in_capture", False))
         self.apply_on_top()
         self.register_hotkeys()
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -199,6 +203,16 @@ class App(ctk.CTk):
         except OSError as exc:
             self.set_status(f"Não consegui salvar o config: {exc}")
 
+    def _tidy_catalog(self) -> None:
+        """Junta no item certo as leituras erradas que versões antigas gravaram como itens novos."""
+        try:
+            changes = self.catalog.tidy()
+        except Exception:  # catálogo é conforto: nunca pode impedir a macro de abrir
+            logbook.get().exception("Não consegui arrumar o catálogo local")
+            return
+        for old, new in changes:
+            logbook.get().info("Catálogo arrumado: %r -> %s", old, repr(new) if new else "apagado (lixo do OCR)")
+
     def _minimize(self) -> None:
         try:
             self.iconify()
@@ -286,6 +300,34 @@ class App(ctk.CTk):
             self.overlay.hide()
         self._update_overlay()
 
+    def apply_capture_mode(self) -> None:
+        """Normal: pescando, a janela e o overlay somem de qualquer print (a macro não se vê).
+        Modo Parsec: aparecem, e a macro se apaga dos próprios prints (capture_mode)."""
+        visible = bool(self.cfg["ui"].get("show_in_capture", False))
+        self.overlay.set_capture_hidden(not visible)
+        if self._running and not window.set_capture_excluded(self, not visible) and not visible:
+            logbook.get().warning("Não deu para esconder a janela da macro dos prints (Windows antigo?)")
+        capture_mode.set_own_windows([window.root_hwnd(self), window.root_hwnd(self.overlay)] if visible else [])
+        if visible and self._running:
+            self.after(MINIMIZE_DELAY_MS + WARN_COVER_DELAY_MS, self._warn_covered_areas)
+
+    def _warn_covered_areas(self) -> None:
+        """Modo Parsec: a macro não enxerga o que a janela dela cobre. Avisa se for algo importante."""
+        hwnd = window.find_roblox()
+        game = window.client_rect(hwnd) if hwnd else None
+        if game is None:
+            return
+        covered: set[str] = set()
+        for widget in (self, self.overlay):
+            win = window.visible_rect(window.root_hwnd(widget))
+            if win is not None:
+                covered.update(capture_mode.covered_areas(win, game, self.cfg))
+        if covered:
+            msg = ("Modo Parsec: a janela da macro ou o overlay está cobrindo " + ", ".join(sorted(covered))
+                   + ". Arraste para o canto esquerdo, senão a macro não enxerga essa parte.")
+            logbook.get().warning(msg)
+            self.set_status(msg)
+
     def reset_overlay(self) -> None:
         self.cfg["ui"]["overlay_pos"] = None
         self.save_soon()
@@ -298,7 +340,7 @@ class App(ctk.CTk):
         self.stat_labels["Tempo"].configure(text=s.elapsed_text() if s.elapsed_seconds() >= 1 else "-")
         self.stat_labels["Itens"].configure(text=str(s.catches))
         self._tracked_title.configure(text=tracked or "Item")
-        self.stat_labels["tracked"].configure(text=str(s.total_of(tracked)) if tracked else "-")
+        self.stat_labels["tracked"].configure(text=str(sum(s.tracked_breakdown(tracked).values())) if tracked else "-")
         self.stat_labels["Perdidos"].configure(text=str(s.misses))
         self.session_tab.refresh()
 
@@ -318,9 +360,7 @@ class App(ctk.CTk):
         self._stop = threading.Event()
         self._running = True
         self.session.start()
-        # a macro não pode se ver no print quando a janela dela fica por cima do jogo
-        if not window.set_capture_excluded(self, True):
-            logbook.get().warning("Não deu para esconder a janela da macro dos prints (Windows antigo?)")
+        self.apply_capture_mode()
         self._render_running()
         self.overlay.set_clickthrough(True)  # pescando: nenhum clique da macro pode parar no overlay
         cb = Callbacks(status=lambda m: self.post(lambda: self.set_status(m)),

@@ -11,6 +11,8 @@ import keyboard
 import mss
 import numpy as np
 
+import capture_mode
+
 from window import Rect
 
 user32 = ctypes.windll.user32
@@ -122,7 +124,8 @@ class Grabber:
 
     def grab(self, rect: Rect) -> np.ndarray:
         shot = self._sct.grab({"left": rect.x, "top": rect.y, "width": rect.w, "height": rect.h})
-        return np.ascontiguousarray(np.asarray(shot)[:, :, :3])
+        # modo Parsec: a janela da macro e o overlay aparecem no print; a macro não lê a si mesma
+        return capture_mode.mask_frame(np.ascontiguousarray(np.asarray(shot)[:, :, :3]), rect)
 
     def close(self) -> None:
         self._sct.close()

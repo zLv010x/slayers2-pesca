@@ -123,6 +123,40 @@ def set_capture_excluded(tk_widget, on: bool) -> bool:
         return False
 
 
+LWA_ALPHA = 0x2
+OPAQUE = 255
+
+
+def visible_rect(hwnd: int) -> Rect | None:
+    """Retângulo da janela na tela, se ela estiver aparecendo (None = oculta ou minimizada)."""
+    if not hwnd or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+        return None
+    r = wintypes.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(r)):
+        return None
+    return Rect(r.left, r.top, r.right - r.left, r.bottom - r.top)
+
+
+def get_alpha(hwnd: int) -> int:
+    """Opacidade atual (0-255). Janela sem transparência nenhuma = 255."""
+    alpha, flags = ctypes.c_ubyte(OPAQUE), wintypes.DWORD(0)
+    if user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED and user32.GetLayeredWindowAttributes(
+            hwnd, None, ctypes.byref(alpha), ctypes.byref(flags)) and flags.value & LWA_ALPHA:
+        return alpha.value
+    return OPAQUE
+
+
+def set_alpha(hwnd: int, alpha: int) -> bool:
+    """Muda a opacidade direto no Windows (pode ser chamada fora da thread do Tk)."""
+    try:
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        if not style & WS_EX_LAYERED:
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
+        return bool(user32.SetLayeredWindowAttributes(hwnd, 0, max(0, min(OPAQUE, int(alpha))), LWA_ALPHA))
+    except (OSError, AttributeError):
+        return False
+
+
 def set_overlay_style(tk_widget, clickthrough: bool) -> bool:
     """Janela que não rouba o foco do Roblox nem aparece na barra de tarefas;
     com `clickthrough`, os cliques passam direto para o que estiver embaixo."""

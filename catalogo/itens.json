@@ -8,7 +8,10 @@
       "rarity_votes": {
         "rare": 5
       },
-      "aliases": []
+      "aliases": [
+        "Clovu'll Fish",
+        "loi:'d.l Fish"
+      ]
     },
     {
       "name": "Coral",
@@ -43,6 +46,34 @@
       "aliases": []
     },
     {
+      "name": "Lost Cape",
+      "slug": "lost-cape",
+      "image": "imagens/lost-cape.png",
+      "rarity": "mythic",
+      "rarity_votes": {
+        "mythic": 5
+      },
+      "aliases": [
+        "LO$t Cape",
+        "LOSt Cape",
+        "Lost Ca pe",
+        "ostCa e"
+      ]
+    },
+    {
+      "name": "Ore",
+      "slug": "ore",
+      "image": "imagens/ore.png",
+      "rarity": "mythic",
+      "rarity_votes": {
+        "mythic": 5
+      },
+      "aliases": [
+        "ROre",
+        "v?Ore"
+      ]
+    },
+    {
       "name": "OuwFish",
       "slug": "ouwfish",
       "image": null,
@@ -50,8 +81,30 @@
       "rarity_votes": {
         "common": 5
       },
+      "aliases": []
+    },
+    {
+      "name": "OuwFwesh",
+      "slug": "ouwfwesh",
+      "image": "imagens/ouwfwesh.png",
+      "rarity": "common",
+      "rarity_votes": {
+        "common": 5
+      },
       "aliases": [
-        "OuwFwesh"
+        "Fwesh"
+      ]
+    },
+    {
+      "name": "Silk Thread",
+      "slug": "silk-thread",
+      "image": "imagens/silk-thread.png",
+      "rarity": "common",
+      "rarity_votes": {
+        "common": 5
+      },
+      "aliases": [
+        "Osilk Thread"
       ]
     },
     {
@@ -75,6 +128,7 @@
       "aliases": [
         "'Zebra Fish",
         "H Zebra Fish",
+        "J b % ayzebra Fish",
         "Jzebra Fish",
         "U Zebra Fish",
         "u) uzebra Fish"

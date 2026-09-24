@@ -64,11 +64,12 @@ class LootReport:
     session_count: int      # quantos itens já pegou nesta sessão
     item_total: int         # quantos desse item nesta sessão
     tracked_name: str       # item acompanhado em todas as mensagens (ex.: "Ore")
-    tracked_total: int      # total desse item na sessão
+    tracked_total: int      # total dos itens com esse nome na sessão (Ore + Refinement Ore...)
     elapsed: str            # tempo de macro rodando, ex.: "1h 05m"
     image: np.ndarray | None
     is_new: bool = False    # primeira vez na coleção (selo NEW! do jogo)
     first_in_catalog: bool = False  # item que o catálogo da macro ainda não conhecia
+    tracked_detail: str = ""        # de onde vem o total, ex.: "Refinement Ore 2 • Ore 1"
 
 
 def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], when: datetime) -> dict:
@@ -79,7 +80,8 @@ def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], whe
         {"name": "Itens na sessão", "value": str(report.session_count), "inline": True},
     ]
     if report.tracked_name:
-        fields.append({"name": f"{report.tracked_name} total", "value": str(report.tracked_total), "inline": True})
+        value = str(report.tracked_total) + (f" ({report.tracked_detail})" if report.tracked_detail else "")
+        fields.append({"name": f"{report.tracked_name} total", "value": value, "inline": True})
     fields.append({"name": "Tempo rodando", "value": report.elapsed, "inline": True})
     embed = {
         "title": ("🆕 " if report.is_new else "") + f"{report.name}  x{report.quantity}",

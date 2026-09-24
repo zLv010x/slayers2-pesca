@@ -118,3 +118,146 @@ def test_plausible_name_fica_no_catalogo_e_o_loot_usa_o_mesmo():
     import catalog
     import loot
     assert loot.plausible_name is catalog.plausible_name
+
+
+# ---------------------------------------------------------------- leituras erradas reais (24/09)
+KNOWN = ["Clown Fish", "Golden Fish", "Zebra Fish", "Krathulon", "Crustadon", "OuwFish", "OuwFwesh",
+         "Silk Thread", "Lost Cape", "Lost Lantern", "Lost Mask", "Metal Scraps", "Coral",
+         "Refinement Ore", "Ore", "Sea Horse", "Squid Beanie"]
+
+
+@pytest.fixture
+def known(dirs):
+    shared, local = dirs
+    shared.mkdir(parents=True)
+    items = [{"name": n, "slug": n.lower().replace(" ", "-"), "image": None, "rarity": "rare",
+              "rarity_votes": {"rare": 1}, "aliases": []} for n in KNOWN]
+    (shared / "itens.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    return Catalog(shared, local)
+
+
+# (lido pelo OCR nos logs do usuário, do Ewerton e do Inside, nome certo)
+MISREADS = [
+    ("Clov.tn Fish", "Clown Fish"), ("Clovt.tn Fish", "Clown Fish"), ("Clovvn Fish", "Clown Fish"),
+    ("Clov•.ifl Fish", "Clown Fish"), ("C 101,vn Fish", "Clown Fish"),
+    ("Golden FEh", "Golden Fish"),
+    ("Z±ra Fish", "Zebra Fish"), ("U Zebra Fish", "Zebra Fish"), ("Jzebra Fish", "Zebra Fish"),
+    ("u) uzebra Fish", "Zebra Fish"), ("quebra Fish", "Zebra Fish"), ("s9zebra Fish", "Zebra Fish"),
+    ("KrathLtlon", "Krathulon"), ("Krath LI lon", "Krathulon"), ("KrathLlIon", "Krathulon"),
+    ("Crusta don", "Crustadon"), ("Crustadofi", "Crustadon"), ("C r Ltstadon", "Crustadon"),
+    ("OuvvFish", "OuwFish"), ("Ouv.tFish", "OuwFish"), ("GNOuwFish", "OuwFish"),
+    ("Ouv.rFwesh", "OuwFwesh"), ("Ouv.tFv.tesh", "OuwFwesh"), ("OuwFv.tesh", "OuwFwesh"),
+    ("Ou w Fv•jesh", "OuwFwesh"),
+    ("Osilk Thread", "Silk Thread"), ("LO$t Cape", "Lost Cape"), ("Lost Ca pe", "Lost Cape"),
+    ("ostCa e", "Lost Cape"), ("Lest Lantern", "Lost Lantern"), ("8 N Metal Scraps", "Metal Scraps"),
+    ("é-4Coral", "Coral"),
+]
+
+
+@pytest.mark.parametrize("read, name", MISREADS)
+def test_leitura_errada_vira_o_item_certo(known, read, name):
+    assert known.resolve(read) == name
+
+
+# Nomes que NÃO podem virar outro item (itens diferentes de verdade ou parecidos demais)
+DIFFERENT = ["OuwFwesh", "Mythic Refinement Ore", "Core", "Big Zebra Fish", "Crustadon Shell",
+             "Lost Mask", "Golden Fishing Rod"]
+
+
+@pytest.mark.parametrize("read", DIFFERENT)
+def test_item_diferente_nao_vira_outro(known, read):
+    assert known.resolve(read) == read
+
+
+def test_ouwfwesh_novo_nao_vira_ouwfish(dirs):
+    """24/09: OuwFwesh é um item de verdade (print "OuwFwesh x1"), não erro de OuwFish."""
+    cat = Catalog(*dirs)
+    cat.record("OuwFish", "common", IMG)
+    assert cat.record("OuwFwesh", "common", IMG).first_time
+
+
+def test_botao_collect_e_etiqueta_new_nao_sao_itens():
+    import catalog
+    for junk in ("Collect", "Cotlect", "lollect", "NEW!", "6d"):
+        assert not catalog.plausible_name(junk), junk
+    for real in ("Ore", "Coral", "Clown Fish", "Metal Scraps"):
+        assert catalog.plausible_name(real), real
+
+
+def _old_local(local, entries):
+    """Catálogo local do jeito que a versão antiga gravava (cada leitura errada virava um item)."""
+    (local / "imagens").mkdir(parents=True, exist_ok=True)
+    items = []
+    for name, count, votes in entries:
+        slug = name.lower().replace(" ", "-").replace("!", "")
+        (local / "imagens" / f"{slug}.png").write_bytes(b"png")
+        items.append({"name": name, "slug": slug, "image": f"imagens/{slug}.png", "rarity": None,
+                      "rarity_votes": votes, "aliases": [], "count": count,
+                      "first_seen": "2026-09-23T20:00:00", "last_seen": "2026-09-24T02:00:00"})
+    (local / "itens.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+
+
+def test_arrumar_junta_leituras_erradas_e_tira_o_lixo(dirs):
+    shared, local = dirs
+    Catalog(shared, local.with_name("outro")).record("Zebra Fish", "rare", IMG)
+    Catalog(shared, local.with_name("outro")).publish()
+    _old_local(local, [("Zebra Fish", 5, {"rare": 5}), ("Jzebra Fish", 3, {"rare": 2, "common": 1}),
+                       ("Clown Fish", 4, {"rare": 4}), ("Clovvn Fish", 1, {"common": 1}),
+                       ("Cotlect", 1, {"common": 1}), ("NEW!", 1, {"common": 1}), ("ouw", 1, {"legendary": 1}),
+                       ("Fish", 2, {"rare": 2}), ("Lost Mask", 1, {"common": 1}), ("OuwFish", 3, {"common": 3})])
+    changes = dict(Catalog(shared, local).tidy())
+    assert changes == {"Jzebra Fish": "Zebra Fish", "Clovvn Fish": "Clown Fish", "Cotlect": None,
+                       "NEW!": None, "ouw": None, "Fish": None}
+    items = {i["name"]: i for i in _index(local)}
+    assert set(items) == {"Zebra Fish", "Clown Fish", "Lost Mask", "OuwFish"}
+    assert items["Zebra Fish"]["count"] == 8
+    assert items["Zebra Fish"]["rarity_votes"] == {"rare": 7, "common": 1}
+    assert "Jzebra Fish" in items["Zebra Fish"]["aliases"]
+    assert items["Clown Fish"]["count"] == 5 and "Clovvn Fish" in items["Clown Fish"]["aliases"]
+    # imagem do lixo e das leituras erradas não fica sobrando
+    assert sorted(p.stem for p in (local / "imagens").glob("*.png")) == ["clown-fish", "lost-mask", "ouwfish", "zebra-fish"]
+    assert Catalog(shared, local).tidy() == []  # arrumar de novo não muda nada
+
+
+def test_arrumar_nunca_junta_o_maior_no_menor(dirs):
+    """Dois itens só do local: a leitura errada (menos vezes) entra no nome certo (mais vezes)."""
+    shared, local = dirs
+    _old_local(local, [("Krathulon", 5, {"legendary": 5}), ("Krath LI lon", 1, {"legendary": 1})])
+    assert dict(Catalog(shared, local).tidy()) == {"Krath LI lon": "Krathulon"}
+    assert [i["name"] for i in _index(local)] == ["Krathulon"]
+
+
+def test_arrumar_passa_a_imagem_para_o_nome_certo_se_ele_nao_tinha(dirs):
+    shared, local = dirs
+    _old_local(local, [("Krathulon", 5, {"legendary": 5}), ("Krath LI lon", 1, {"legendary": 1})])
+    data = json.loads((local / "itens.json").read_text(encoding="utf-8"))
+    data["items"][0]["image"] = None
+    (local / "imagens" / "krathulon.png").unlink()
+    (local / "itens.json").write_text(json.dumps(data), encoding="utf-8")
+    Catalog(shared, local).tidy()
+    item = _index(local)[0]
+    assert item["image"] == "imagens/krathulon.png" and (local / item["image"]).exists()
+
+
+def test_arrumar_no_empate_fica_o_nome_mais_completo(dirs):
+    """Ensaio no catálogo real (24/09): "LOSt Cape" entrava em "ostCa e" (os dois com 1)."""
+    shared, local = dirs
+    _old_local(local, [("LOSt Cape", 1, {"mythic": 1}), ("ostCa e", 1, {"common": 1})])
+    assert dict(Catalog(shared, local).tidy()) == {"ostCa e": "LOSt Cape"}
+
+
+def test_arrumar_junta_pedaco_que_e_apelido_em_vez_de_apagar(known, dirs):
+    """"Fwesh" é apelido conhecido de OuwFwesh: soma no item em vez de sumir como pedaço."""
+    shared, local = dirs
+    data = json.loads((shared / "itens.json").read_text(encoding="utf-8"))
+    next(i for i in data["items"] if i["name"] == "OuwFwesh")["aliases"] = ["Fwesh"]
+    (shared / "itens.json").write_text(json.dumps(data), encoding="utf-8")
+    _old_local(local, [("Fwesh", 1, {"common": 1})])
+    assert dict(Catalog(shared, local).tidy()) == {"Fwesh": "OuwFwesh"}
+
+
+def test_arrumar_da_mais_uma_volta_depois_de_juntar(known, dirs):
+    """"quebra Fish" empatava entre Zebra Fish e "Jzebra Fish" até o Jzebra ser juntado."""
+    _, local = dirs
+    _old_local(local, [("Jzebra Fish", 19, {"rare": 19}), ("quebra Fish", 1, {"rare": 1})])
+    assert dict(Catalog(*dirs).tidy()) == {"Jzebra Fish": "Zebra Fish", "quebra Fish": "Zebra Fish"}

@@ -14,6 +14,7 @@ import time
 
 import numpy as np
 
+import capture_mode
 import logbook
 import relog
 import screen
@@ -83,7 +84,8 @@ def set_spawn(f) -> spawn.SpawnResult:
     vara/T dentro dela, e devolve falha. F1 (StopRun) passa direto."""
     actions = RelogActions(f)
     try:
-        return spawn.Setter(actions).run()
+        with capture_mode.hidden():  # modo Parsec: a lista de comandos pode ficar atrás da macro
+            return spawn.Setter(actions).run()
     except StopRun:
         raise
     except Exception as exc:
@@ -147,6 +149,25 @@ def _stop_for_good(f, msg: str) -> None:
 
 def handle(f, img: np.ndarray | None) -> bool:
     """O jogo caiu? True = reconectou sozinho; False = nada caiu. Senão levanta StopRun."""
+    if not capture_mode.active():
+        return _handle(f, img)
+    # Modo Parsec: o overlay fica em cima do PLAY do menu (na party) e a janela da macro pode
+    # cobrir botões; confere e reconecta com as duas transparentes.
+    with capture_mode.hidden():
+        return _handle(f, _clean_frame(f, img))
+
+
+def _clean_frame(f, img: np.ndarray | None) -> np.ndarray | None:
+    try:
+        return f.grabber.grab(f.rect())
+    except StopRun:
+        raise
+    except Exception:
+        log.exception("Não consegui tirar um print limpo; confiro no anterior")
+        return img
+
+
+def _handle(f, img: np.ndarray | None) -> bool:
     try:
         s = lost_game_screen(img, f.cfg.get("relog"))
     except Exception:  # OCR falhou: segue como um problema comum
