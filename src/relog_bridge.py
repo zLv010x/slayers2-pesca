@@ -16,6 +16,7 @@ import numpy as np
 
 import capture_mode
 import logbook
+import window
 import relog
 import screen
 import spawn
@@ -38,31 +39,38 @@ class RelogActions:
         self.f = fisher
         self._origin = (0, 0)
 
+    # Modo Parsec: cada leitura/clique acontece com a janela da macro e o overlay transparentes
+    # e sem pegar clique (o PLAY do menu fica embaixo deles). Fora dele, hidden() não faz nada.
     def grab(self):
         r = self.f.rect()
         self._origin = (r.x, r.y)
-        return r.x, r.y, self.f.grabber.grab(r)
+        with capture_mode.hidden():
+            return r.x, r.y, self.f.grabber.grab(r)
 
     def _abs(self, x: int, y: int) -> tuple[int, int]:
         return self._origin[0] + int(x), self._origin[1] + int(y)
 
     def click(self, x: int, y: int) -> bool:
-        return bool(screen.click_at(*self._abs(x, y)))  # False = o cursor não chegou (mouse em uso)
+        with capture_mode.hidden():
+            return bool(screen.click_at(*self._abs(x, y)))  # False = o cursor não chegou (mouse em uso)
 
     def mouse_down(self, x: int, y: int) -> bool:
-        if not screen.move_to(*self._abs(x, y)):
-            return False  # não segura o botão onde o cursor estiver
-        self.f.mouse.set(True)
-        return True
+        with capture_mode.hidden():
+            if not screen.move_to(*self._abs(x, y)):
+                return False  # não segura o botão onde o cursor estiver
+            self.f.mouse.set(True)
+            return True
 
     def mouse_up(self) -> None:
         self.f.mouse.release()
 
     def type_text(self, text: str) -> None:
-        screen.type_text(text)
+        with capture_mode.hidden():
+            screen.type_text(text)
 
     def press(self, key: str) -> None:
-        screen.tap_key(key)
+        with capture_mode.hidden():
+            screen.tap_key(key)
 
     def sleep(self, sec: float) -> None:
         self.f.sleep(sec)
@@ -84,8 +92,7 @@ def set_spawn(f) -> spawn.SpawnResult:
     vara/T dentro dela, e devolve falha. F1 (StopRun) passa direto."""
     actions = RelogActions(f)
     try:
-        with capture_mode.hidden():  # modo Parsec: a lista de comandos pode ficar atrás da macro
-            return spawn.Setter(actions).run()
+        return spawn.Setter(actions).run()
     except StopRun:
         raise
     except Exception as exc:
@@ -149,19 +156,20 @@ def _stop_for_good(f, msg: str) -> None:
 
 def handle(f, img: np.ndarray | None) -> bool:
     """O jogo caiu? True = reconectou sozinho; False = nada caiu. Senão levanta StopRun."""
-    if not capture_mode.active():
-        return _handle(f, img)
-    # Modo Parsec: o overlay fica em cima do PLAY do menu (na party) e a janela da macro pode
-    # cobrir botões; confere e reconecta com as duas transparentes.
-    with capture_mode.hidden():
-        return _handle(f, _clean_frame(f, img))
+    if capture_mode.active():
+        img = _clean_frame(f, img)
+    return _handle(f, img)
 
 
 def _clean_frame(f, img: np.ndarray | None) -> np.ndarray | None:
+    """Modo Parsec: print novo com a macro transparente (o overlay fica em cima do PLAY do menu).
+    Não espera o Roblox voltar: sem o jogo na tela, confere no print que já tinha."""
     try:
-        return f.grabber.grab(f.rect())
-    except StopRun:
-        raise
+        r = window.client_rect(f.hwnd) if getattr(f, "hwnd", None) else None
+        if r is None:
+            return img
+        with capture_mode.hidden():
+            return f.grabber.grab(r)
     except Exception:
         log.exception("Não consegui tirar um print limpo; confiro no anterior")
         return img

@@ -27,6 +27,7 @@ WDA_NONE = 0x0
 WDA_EXCLUDEFROMCAPTURE = 0x11
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x20
+WS_EX_TOPMOST = 0x8
 WS_EX_TOOLWINDOW = 0x80
 WS_EX_APPWINDOW = 0x40000
 WS_EX_LAYERED = 0x80000
@@ -135,6 +136,22 @@ def visible_rect(hwnd: int) -> Rect | None:
     if not user32.GetWindowRect(hwnd, ctypes.byref(r)):
         return None
     return Rect(r.left, r.top, r.right - r.left, r.bottom - r.top)
+
+
+def get_exstyle(hwnd: int) -> int:
+    return user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+
+
+def set_exstyle(hwnd: int, style: int) -> bool:
+    try:
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+        return bool(user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_STYLE_ONLY))
+    except (OSError, AttributeError):
+        return False
+
+
+def is_topmost(hwnd: int) -> bool:
+    return bool(get_exstyle(hwnd) & WS_EX_TOPMOST)
 
 
 def get_alpha(hwnd: int) -> int:

@@ -261,3 +261,48 @@ def test_arrumar_da_mais_uma_volta_depois_de_juntar(known, dirs):
     _, local = dirs
     _old_local(local, [("Jzebra Fish", 19, {"rare": 19}), ("quebra Fish", 1, {"rare": 1})])
     assert dict(Catalog(*dirs).tidy()) == {"Jzebra Fish": "Zebra Fish", "quebra Fish": "Zebra Fish"}
+
+
+# ---------------------------------------------------------------- revisão de 24/09
+def test_arrumar_nao_apaga_item_curto_de_verdade(dirs):
+    """"Ore" com 40 pegos não é pedaço de "Refinement Ore": só apaga pedaço visto 1-2 vezes."""
+    shared, local = dirs
+    _old_local(local, [("Ore", 40, {"mythic": 40}), ("Refinement Ore", 17, {"rare": 17}), ("ouw", 1, {})])
+    changes = dict(Catalog(shared, local).tidy())
+    assert "Ore" not in changes
+    assert {i["name"] for i in _index(local)} == {"Ore", "Refinement Ore", "ouw"}  # ouw: nada conhecido com ele
+
+
+def test_arrumar_nao_junta_itens_parecidos_vistos_muitas_vezes(dirs):
+    """Anglerfish x Angelfish (0,842): 12 pegos não é leitura errada, é outro peixe."""
+    shared, local = dirs
+    _old_local(local, [("Angelfish", 50, {"rare": 50}), ("Anglerfish", 12, {"rare": 12})])
+    assert Catalog(shared, local).tidy() == []
+
+
+def test_leitura_rara_parecida_junta(dirs):
+    shared, local = dirs
+    _old_local(local, [("Krathulon", 72, {"legendary": 72}), ("KrathLtlon", 3, {"legendary": 3})])
+    assert dict(Catalog(shared, local).tidy()) == {"KrathLtlon": "Krathulon"}
+
+
+def test_arrumar_guarda_copia_antes_de_mudar(dirs):
+    shared, local = dirs
+    _old_local(local, [("Coral", 5, {"common": 5}), ("NEW!", 1, {})])
+    before = (local / "itens.json").read_text(encoding="utf-8")
+    Catalog(shared, local).tidy()
+    assert (local / "itens.antes-de-arrumar.json").read_text(encoding="utf-8") == before
+
+
+def test_chute_por_semelhanca_nao_vira_apelido_gravado(dirs):
+    """Nome novo parecido (0,84) usa o conhecido na hora, mas não fica gravado como apelido:
+    senão um item novo de verdade ficaria preso ao nome errado (e iria para os amigos)."""
+    cat = Catalog(*dirs)
+    cat.record("Angelfish", "rare", IMG)
+    assert cat.record("Anglerfish", "rare", IMG).name == "Angelfish"
+    assert _index(dirs[1])[0]["aliases"] == []
+
+
+def test_collector_nao_e_o_botao_collect():
+    import catalog
+    assert catalog.plausible_name("Collector") and catalog.plausible_name("Collected")

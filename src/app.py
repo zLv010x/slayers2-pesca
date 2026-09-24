@@ -304,6 +304,8 @@ class App(ctk.CTk):
         """Normal: pescando, a janela e o overlay somem de qualquer print (a macro não se vê).
         Modo Parsec: aparecem, e a macro se apaga dos próprios prints (capture_mode)."""
         visible = bool(self.cfg["ui"].get("show_in_capture", False))
+        if visible:  # já em camadas aqui, na thread do Tk (a da pesca só muda a opacidade)
+            window.set_alpha(window.root_hwnd(self), window.OPAQUE)
         self.overlay.set_capture_hidden(not visible)
         if self._running and not window.set_capture_excluded(self, not visible) and not visible:
             logbook.get().warning("Não deu para esconder a janela da macro dos prints (Windows antigo?)")

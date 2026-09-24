@@ -72,6 +72,19 @@ class LootReport:
     tracked_detail: str = ""        # de onde vem o total, ex.: "Refinement Ore 2 • Ore 1"
 
 
+TRACKED_DETAIL_MAX = 5  # campo do Discord aceita até 1024 caracteres: palavra comum ("Fish") estouraria
+
+
+def tracked_detail(parts: dict[str, int]) -> str:
+    """ "Refinement Ore 17 • Ore 2" (os maiores primeiro; o resto vira "+N"). Vazio se for um só."""
+    if len(parts) < 2:
+        return ""
+    top = sorted(parts.items(), key=lambda kv: -kv[1])
+    text = " • ".join(f"{n} {q}" for n, q in top[:TRACKED_DETAIL_MAX])
+    rest = len(top) - TRACKED_DETAIL_MAX
+    return text + (f" • +{rest}" if rest > 0 else "")
+
+
 def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], when: datetime) -> dict:
     rarity = report.rarity if report.rarity in RARITY_COLORS else "common"
     fields = [

@@ -200,16 +200,29 @@ def _fake_hidden(entered):
 
 def test_modo_parsec_confere_o_menu_com_print_limpo(monkeypatch):
     """O overlay fica em cima do PLAY do menu: com ele aparecendo nos prints (Parsec), a
-    conferência tira um print novo com a macro transparente."""
+    conferência tira um print novo com a macro transparente, e só nesse instante."""
     entered, seen = [], []
     monkeypatch.setattr(relog_bridge.capture_mode, "active", lambda: True)
     monkeypatch.setattr(relog_bridge.capture_mode, "hidden", _fake_hidden(entered))
+    monkeypatch.setattr(relog_bridge.window, "client_rect", lambda hwnd: Rect(0, 0, 10, 10))
     monkeypatch.setattr(relog_bridge, "lost_game_screen",
                         lambda img, cfg=None: seen.append((img, list(entered))))
-    f = SimpleNamespace(cfg=_cfg(), rect=lambda: Rect(0, 0, 10, 10),
-                        grabber=SimpleNamespace(grab=lambda r: "print limpo"))
+    f = SimpleNamespace(cfg=_cfg(), hwnd=123, grabber=SimpleNamespace(grab=lambda r: "print limpo"),
+                        rect=lambda: pytest.fail("não pode esperar o Roblox com as janelas escondidas"))
     assert relog_bridge.handle(f, "print com overlay") is False
-    assert seen == [("print limpo", ["in"])] and entered == ["in", "out"]
+    assert seen == [("print limpo", ["in", "out"])]
+
+
+def test_modo_parsec_com_o_roblox_fechado_usa_o_print_que_tinha(monkeypatch):
+    """Revisão de 24/09: não pode ficar esperando o jogo voltar com a macro invisível."""
+    entered, seen = [], []
+    monkeypatch.setattr(relog_bridge.capture_mode, "active", lambda: True)
+    monkeypatch.setattr(relog_bridge.capture_mode, "hidden", _fake_hidden(entered))
+    monkeypatch.setattr(relog_bridge.window, "client_rect", lambda hwnd: None)
+    monkeypatch.setattr(relog_bridge, "lost_game_screen", lambda img, cfg=None: seen.append(img))
+    f = SimpleNamespace(cfg=_cfg(), hwnd=123, grabber=SimpleNamespace(grab=lambda r: pytest.fail("sem jogo")))
+    assert relog_bridge.handle(f, "print") is False
+    assert seen == ["print"] and entered == []
 
 
 def test_modo_normal_usa_o_print_que_ja_tinha(monkeypatch):
@@ -221,18 +234,15 @@ def test_modo_normal_usa_o_print_que_ja_tinha(monkeypatch):
     assert seen == ["print"]
 
 
-def test_modo_parsec_seta_o_spawn_com_a_macro_transparente(monkeypatch):
-    entered = []
-    monkeypatch.setattr(relog_bridge.capture_mode, "active", lambda: True)
+def test_modo_parsec_cada_leitura_e_clique_do_relog_fica_escondido_so_na_hora(monkeypatch):
+    """Revisão de 24/09: esconder o relog inteiro deixava a macro invisível por minutos."""
+    entered, log = [], []
     monkeypatch.setattr(relog_bridge.capture_mode, "hidden", _fake_hidden(entered))
-
-    class Spy:
-        def __init__(self, actions):
-            pass
-
-        def run(self):
-            entered.append("run")
-            return relog_bridge.spawn.SpawnResult(True, "ok")
-    monkeypatch.setattr(relog_bridge.spawn, "Setter", Spy)
-    assert relog_bridge.set_spawn(SimpleNamespace()).ok
-    assert entered == ["in", "run", "out"]
+    monkeypatch.setattr(relog_bridge.screen, "click_at", lambda x, y: log.append(("click", list(entered))) or True)
+    f = SimpleNamespace(rect=lambda: log.append(("rect", list(entered))) or Rect(0, 0, 10, 10),
+                        grabber=SimpleNamespace(grab=lambda r: log.append(("grab", list(entered))) or "img"))
+    actions = relog_bridge.RelogActions(f)
+    actions.grab()
+    actions.click(1, 1)
+    assert log == [("rect", []), ("grab", ["in"]), ("click", ["in", "out", "in"])]
+    assert entered == ["in", "out", "in", "out"]

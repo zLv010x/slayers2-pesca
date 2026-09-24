@@ -46,6 +46,12 @@ FUZZY_MARGIN = 0.05          # dois nomes quase iguais ao lido: não chuta nenhu
 AFFIX_MIN_LEN = 6
 AFFIX_MAX_JUNK = 2
 TIDY_MAX_PASSES = 3
+# O arrumar só junta por semelhança (e só apaga pedaço de nome) o que foi visto poucas vezes:
+# "Anglerfish" pego 12 vezes é outro peixe, não "Angelfish" lido errado.
+TIDY_RARE_COUNT = 2
+TIDY_RARE_SHARE = 0.10
+TIDY_BACKUP_NAME = "itens.antes-de-arrumar.json"
+EXACT_HOWS = ("exact", "fixed", "alias", "affix")   # jeitos de achar que não são chute
 SHARED_FIELDS = ("name", "slug", "image", "rarity", "rarity_votes", "aliases")
 # Nome de item tem pelo menos 3 letras ("Ore"): "6d" (prazo dos códigos no menu principal)
 # e textos da própria tela ("Collect", "item", a etiqueta "NEW!") não são itens.
@@ -77,6 +83,8 @@ def plausible_name(name: str) -> bool:
     key = normalize(name)
     if len(letters) < MIN_NAME_LETTERS or key in IGNORED_NAMES:
         return False
+    if len(key) > len(PROMPT_WORD) + 1:
+        return True  # "Collector"/"Collected" podem ser itens
     return difflib.SequenceMatcher(None, key, PROMPT_WORD).ratio() < PROMPT_CUTOFF
 
 
@@ -118,7 +126,8 @@ def _affix_match(key: str, entries: dict[str, dict]) -> str | None:
     return max(fits, key=len, default=None)
 
 
-def _fuzzy_match(key: str, entries: dict[str, dict]) -> str | None:
+def _fuzzy_match(key: str, entries: dict[str, dict]) -> tuple[str, bool] | None:
+    """Nome conhecido parecido; bool = só passou no corte folgado (nome longo)."""
     if len(key) < FUZZY_MIN_LEN or not entries:
         return None
     scored = sorted(((difflib.SequenceMatcher(None, key, k).ratio(), k) for k in entries), reverse=True)
@@ -129,7 +138,7 @@ def _fuzzy_match(key: str, entries: dict[str, dict]) -> str | None:
         return None
     if len(scored) > 1 and best - scored[1][0] < FUZZY_MARGIN:
         return None  # dois itens quase iguais ao que foi lido: não dá para saber qual
-    return found
+    return found, best < FUZZY_CUTOFF
 
 
 def _new_entry(name: str) -> dict:
@@ -154,28 +163,29 @@ class Catalog:
     def _entries(self) -> dict[str, dict]:
         return {**self.local, **self.shared}
 
-    def _find(self, name: str, exclude: str | None = None) -> tuple[str | None, bool]:
-        """Chave do item para esse nome lido; bool = achou por aproximação.
-
-        Tenta o nome como veio e com as trocas típicas do OCR desfeitas, nesta ordem:
-        igual, apelido conhecido, sujeira do ícone antes do nome, parecido."""
+    def _find(self, name: str, exclude: str | None = None) -> tuple[str | None, str | None]:
+        """Chave do item para esse nome lido e como achou: "exact", "fixed" (trocas do OCR
+        desfeitas), "alias", "affix" (sujeira antes do nome), "fuzzy" ou "fuzzy_relaxed"."""
         keys = [k for k in dict.fromkeys((normalize(name), normalize(fix_ocr(name)))) if k]
         if not keys:
-            return None, False
+            return None, None
         entries = {k: e for k, e in self._entries().items() if k != exclude}
         for key in keys:
             if key in entries:
-                return key, key != keys[0]
+                return key, "exact" if key == keys[0] else "fixed"
         for key in keys:
             for k, entry in entries.items():
                 if key in {normalize(a) for a in entry.get("aliases", [])}:
-                    return k, False
-        for match in (_affix_match, _fuzzy_match):
-            for key in keys:
-                found = match(key, entries)
-                if found:
-                    return found, True
-        return None, False
+                    return k, "alias"
+        for key in keys:
+            found = _affix_match(key, entries)
+            if found:
+                return found, "affix"
+        for key in keys:
+            fuzzy = _fuzzy_match(key, entries)
+            if fuzzy:
+                return fuzzy[0], "fuzzy_relaxed" if fuzzy[1] else "fuzzy"
+        return None, None
 
     def _canonical(self, key: str) -> dict:
         return self.shared.get(key) or self.local[key]
@@ -195,7 +205,7 @@ class Catalog:
                when: datetime | None = None) -> Recorded:
         when_iso = (when or datetime.now()).isoformat(timespec="seconds")
         with self._lock:
-            key, fuzzy = self._find(name)
+            key, how = self._find(name)
             first_time = key is None
             if key is None:
                 key = normalize(name)
@@ -203,7 +213,10 @@ class Catalog:
             local = self.local.setdefault(key, _new_entry(canonical_name))
             local.setdefault("count", 0)
             local.setdefault("first_seen", when_iso)
-            if normalize(name) != key and name not in local["aliases"] and not self._is_known_alias(key, name):
+            # chute folgado vale na hora, mas não vira apelido gravado: se for um item novo de
+            # verdade, ele ficaria preso ao nome errado (e iria para os amigos no publicar)
+            if (how != "fuzzy_relaxed" and normalize(name) != key and name not in local["aliases"]
+                    and not self._is_known_alias(key, name)):
                 local["aliases"].append(name)
             votes = Counter(local.get("rarity_votes", {}))
             votes[rarity] += 1
@@ -221,7 +234,7 @@ class Catalog:
                 # disco travado (OneDrive/antivírus) não pode abortar o registro antes do Discord
                 # ser avisado: só loga e segue (a próxima gravação bem-sucedida já corrige o arquivo).
                 logbook.get().warning("Não consegui salvar o catálogo local: %s", exc)
-            corrected = fuzzy or normalize(name) != key
+            corrected = how not in (None, "exact") or normalize(name) != key
             return Recorded(canonical_name, best, first_time, corrected)
 
     def _is_known_alias(self, key: str, name: str) -> bool:
@@ -247,6 +260,7 @@ class Catalog:
                     break
             if changes:
                 try:
+                    self._backup_local_index()
                     _save_index(self.local_dir / INDEX_NAME, self.local)
                 except OSError as exc:
                     logbook.get().warning("Não consegui salvar o catálogo local arrumado: %s", exc)
@@ -266,14 +280,28 @@ class Catalog:
                 self._drop_local(key)
                 changes.append((name, None))
                 continue
-            target, _ = self._find(name, exclude=key)
-            if target is not None and self._can_absorb(target, key):
-                self._merge_local(key, target)
-                changes.append((name, self._canonical(target)["name"]))
-            elif target is None and self._is_partial(key):
+            target, how = self._find(name, exclude=key)
+            if target is not None:
+                if self._can_absorb(target, key) and (how in EXACT_HOWS or self._rare_read(key, target)):
+                    self._merge_local(key, target)
+                    changes.append((name, self._canonical(target)["name"]))
+            elif self._is_partial(key) and self._count(key) <= TIDY_RARE_COUNT:
                 self._drop_local(key)
                 changes.append((name, None))
         return changes
+
+    def _count(self, key: str) -> int:
+        return self.local.get(key, {}).get("count", 0)
+
+    def _rare_read(self, key: str, target: str) -> bool:
+        """Leitura vista poucas vezes (perto do item certo): pode ser juntada por semelhança."""
+        n = self._count(key)
+        return n <= TIDY_RARE_COUNT or n <= TIDY_RARE_SHARE * self._count(target)
+
+    def _backup_local_index(self) -> None:
+        index = self.local_dir / INDEX_NAME
+        if index.exists():
+            shutil.copy2(index, self.local_dir / TIDY_BACKUP_NAME)
 
     def _is_partial(self, key: str) -> bool:
         """Pedaço de um nome conhecido ("ouw" de OuwFish, "Fish"): leitura cortada, não item."""

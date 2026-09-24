@@ -19,6 +19,7 @@ from typing import Callable
 import numpy as np
 
 import bait_menu
+import capture_mode
 import hotbar
 import logbook
 import loot as loot_mod
@@ -35,7 +36,7 @@ from compass import CompassLock
 from restart_policy import RestartPolicy
 from session import Session
 from stops import Relogged, StopRun
-from webhook import DiscordNotifier, LootReport
+from webhook import DiscordNotifier, LootReport, tracked_detail
 
 SEARCH_PAD_X, SEARCH_PAD_X_MIN = 1.5, 80
 SEARCH_PAD_Y, SEARCH_PAD_Y_MIN = 0.125, 24
@@ -653,7 +654,7 @@ class Fisher:
             image=snap if d.get("send_image", True) else None,
             is_new=item.is_new,
             first_in_catalog=first_in_catalog,
-            tracked_detail=" • ".join(f"{n} {q}" for n, q in parts.items()) if len(parts) > 1 else "",
+            tracked_detail=tracked_detail(parts),
         ))
         return item
 
@@ -667,13 +668,19 @@ class Fisher:
             self.cb.bait(self.baits.summary(self.cfg["baits"]["infinite"]), self.baits.warning)
 
     def _maybe_check_baits(self) -> None:
-        if self._menu_stuck and not self._close_menu(bait_menu.BaitMenu(self)):
-            raise Recoverable("o menu do jogo continua aberto", self._safe_shot())
+        # Modo Parsec: a janela da macro cobre a coluna do menu ("Inventory"); lê e clica com
+        # ela transparente. Fora dele, hidden() não faz nada.
+        if self._menu_stuck:
+            with capture_mode.hidden():
+                closed = self._close_menu(bait_menu.BaitMenu(self))
+            if not closed:
+                raise Recoverable("o menu do jogo continua aberto", self._safe_shot())
         if not self._baits_on() or self.cycles < self._bait_retry_at:
             return
         c = self.cfg["baits"]
         if self.bait_check_requested or self.baits.needs_check(int(c["recheck_at"]), c["infinite"]):
-            self.check_baits()
+            with capture_mode.hidden():
+                self.check_baits()
 
     def check_baits(self) -> None:
         """Abre o inventário, conta as iscas e troca se a equipada acabou."""
