@@ -195,6 +195,25 @@ class SetupTab:
         if cfg.get("ground_pickup", True):
             self.ground.select()
 
+        box = section(scroll, "Iscas")
+        r = row(box)
+        self.baits_on = ctk.CTkSwitch(r, text="Controlar iscas (contar e trocar sozinho)", command=self._save_baits)
+        self.baits_on.pack(side="left")
+        if cfg["baits"].get("enabled", True):
+            self.baits_on.select()
+        r = row(box)
+        ctk.CTkButton(r, text="Conferir iscas agora", width=150, command=app.request_bait_check).pack(side="left")
+        app.number_entry(r, cfg["baits"], "recheck_at", width=50, cast=int).pack(side="right")
+        ctk.CTkLabel(r, text="conferir quando faltarem", text_color=MUTED).pack(side="right", padx=6)
+        r = row(box)
+        ctk.CTkLabel(r, text="Ordem").pack(side="left")
+        self.bait_order = ctk.CTkEntry(r)
+        self.bait_order.insert(0, ", ".join(cfg["baits"]["order"]))
+        self.bait_order.pack(side="left", fill="x", expand=True, padx=8)
+        self.bait_order.bind("<KeyRelease>", lambda _e: self._save_baits())
+        hint(box, "Na 1ª vez a macro abre o menu (M → Inventory → Fishing) e conta as iscas. "
+                  "Usa a primeira da ordem que você tiver; quando acabar, troca para a próxima e avisa.")
+
         box = section(scroll, "Atalhos")
         labels = {"start_stop": "Iniciar / parar", "set_cast_point": "Marcar ponto", "exit": "Fechar macro"}
         self.hotkey_btns: dict[str, ctk.CTkButton] = {}
@@ -226,6 +245,14 @@ class SetupTab:
 
     def _save_lock(self) -> None:
         self.app.cfg["compass_lock"] = bool(self.lock.get())
+        self.app.save_soon()
+
+    def _save_baits(self) -> None:
+        b = self.app.cfg["baits"]
+        b["enabled"] = bool(self.baits_on.get())
+        names = [n.strip() for n in self.bait_order.get().split(",") if n.strip()]
+        if names:
+            b["order"] = names
         self.app.save_soon()
 
     def _save_ground(self) -> None:

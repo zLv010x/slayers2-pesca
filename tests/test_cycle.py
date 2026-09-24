@@ -183,3 +183,88 @@ def test_opcao_desligada_nao_mexe_na_vara(presses, monkeypatch, tmp_path):
     f._hold_t = lambda before, budget, where: ([], None)
     assert f.collect() == []
     assert presses == [] and f.session.misses == 1
+
+
+class FakeMenu:
+    """Menu do jogo de mentira: inventário definido pelo teste."""
+
+    def __init__(self, inv, fail=False):
+        self.inv, self.fail = inv, fail      # inv: nome -> (quantidade|None, equipada)
+        self.equipped_calls, self.closed = [], False
+
+    def open(self):
+        if self.fail:
+            raise cycle.bait_menu.MenuError("menu não abriu")
+
+    def inspect(self, name):
+        if name not in self.inv:
+            return cycle.bait_menu.BaitInfo(False, 0, False)
+        count, eq = self.inv[name]
+        return cycle.bait_menu.BaitInfo(True, count, eq)
+
+    def equip(self, name):
+        self.equipped_calls.append(name)
+        return True
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def bait_env(monkeypatch):
+    from baits import BaitState
+
+    def make(inv, fail=False):
+        menu = FakeMenu(inv, fail)
+        monkeypatch.setattr(cycle.bait_menu, "BaitMenu", lambda fisher: menu)
+        monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+        f = FakeFisher([])
+        f.baits = BaitState()
+        f.notifier = FakeNotifier()
+        f.cfg["discord"]["notify_problems"] = True
+        f._safe_shot = lambda: None
+        return f, menu
+    return make
+
+
+def test_rare_acabou_troca_para_lendaria_e_avisa(bait_env):
+    f, menu = bait_env({"Drowned Lure": (None, False), "Worm": (13, False)})  # Fish Head sumiu = 0
+    f.check_baits()
+    assert menu.equipped_calls == ["Drowned Lure"]
+    assert f.baits.equipped == "Drowned Lure"
+    assert any("Drowned Lure" in text and ping for text, ping in f.notifier.sent)
+    assert menu.closed
+
+
+def test_com_rare_nao_mexe_em_nada(bait_env):
+    f, menu = bait_env({"Fish Head": (662, True), "Drowned Lure": (None, False)})
+    f.check_baits()
+    assert menu.equipped_calls == []
+    assert f.baits.summary(["Drowned Lure"]).startswith("Isca: Fish Head · 662")
+    assert f.notifier.sent == []
+
+
+def test_amigo_sem_lendaria_vai_para_a_comum(bait_env):
+    f, menu = bait_env({"Worm": (13, False)})
+    f.check_baits()
+    assert menu.equipped_calls == ["Worm"]
+
+
+def test_sem_nenhuma_isca_avisa_uma_vez_e_continua(bait_env):
+    f, menu = bait_env({})
+    f.check_baits()
+    f.check_baits()
+    assert menu.equipped_calls == []
+    assert len(f.notifier.sent) == 1 and "sem isca" in f.notifier.sent[0][0]
+
+
+def test_comprou_rare_de_novo_volta_para_ela(bait_env):
+    f, menu = bait_env({"Fish Head": (200, False), "Drowned Lure": (None, True)})
+    f.check_baits()
+    assert menu.equipped_calls == ["Fish Head"]
+
+
+def test_menu_com_erro_nao_derruba_a_pesca(bait_env):
+    f, menu = bait_env({}, fail=True)
+    f.check_baits()
+    assert menu.closed and f._bait_retry_at > f.cycles

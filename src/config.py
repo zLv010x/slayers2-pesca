@@ -62,6 +62,13 @@ DEFAULTS: dict = {
         "aim_offset": 0.0,
         "zone_hold_s": 1.0,
     },
+    "baits": {
+        "enabled": True,
+        # ordem de preferência: a primeira que tiver é a usada
+        "order": ["Fish Head", "Drowned Lure", "Worm"],
+        "infinite": ["Drowned Lure"],   # iscas que não gastam
+        "recheck_at": 10,               # confere o inventário quando faltarem isso
+    },
     "ui": {"always_on_top": True, "show_recent": True},
     "config_rev": 2,
 }

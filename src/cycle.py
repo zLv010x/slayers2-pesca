@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
 
+import bait_menu
 import hotbar
 import logbook
 import loot as loot_mod
@@ -25,6 +27,7 @@ import screen
 import window
 from bar_control import TrackController
 from bar_detect import Detector
+from baits import BaitState
 from catalog import Catalog
 from compass import CompassLock
 from session import Session
@@ -45,6 +48,8 @@ PROMPT_GRACE_SEC = 1.0
 HOLD_SLACK_SEC = 1.5
 FOREGROUND_POLL_SEC = 0.5
 STATS_EVERY_CYCLES = 10
+# Conferência de iscas que falhou: tenta de novo depois de tantos ciclos.
+BAIT_RETRY_CYCLES = 20
 
 log = logbook.get()
 
@@ -66,6 +71,8 @@ class Callbacks:
     status: Callable[[str], None]
     # (itens novos, recorte do último item para mostrar na tela); lista vazia = drop perdido
     loot: Callable[[list[loot_mod.Loot], np.ndarray | None], None]
+    # (resumo das iscas, é aviso?)
+    bait: Callable[[str, bool], None] = field(default=lambda text, warn: None)
 
 
 @dataclass(frozen=True)
@@ -79,8 +86,14 @@ class PixelRect:
 class Fisher:
     def __init__(self, cfg: dict, cb: Callbacks, session: Session,
                  notifier: DiscordNotifier, compass: CompassLock,
-                 catalog: Catalog | None = None) -> None:
+                 catalog: Catalog | None = None, baits: BaitState | None = None,
+                 bait_path: Path | None = None) -> None:
         self.catalog = catalog
+        self.baits = baits
+        self.bait_path = bait_path
+        self.bait_check_requested = False
+        self._bait_retry_at = 0
+        self._no_bait_warned = False
         self.cfg = cfg
         self.cb = cb
         self.session = session
@@ -413,9 +426,85 @@ class Fisher:
         return item
 
     # ---------- laço ----------
+    # ---------- iscas ----------
+    def _baits_on(self) -> bool:
+        return self.baits is not None and bool(self.cfg["baits"].get("enabled", True))
+
+    def _report_bait(self) -> None:
+        if self._baits_on():
+            self.cb.bait(self.baits.summary(self.cfg["baits"]["infinite"]), self.baits.warning)
+
+    def _maybe_check_baits(self) -> None:
+        if not self._baits_on() or self.cycles < self._bait_retry_at:
+            return
+        c = self.cfg["baits"]
+        if self.bait_check_requested or self.baits.needs_check(int(c["recheck_at"]), c["infinite"]):
+            self.check_baits()
+
+    def check_baits(self) -> None:
+        """Abre o inventário, conta as iscas e troca se a equipada acabou."""
+        c = self.cfg["baits"]
+        order, infinite = list(c["order"]), list(c["infinite"])
+        self.bait_check_requested = False
+        menu = bait_menu.BaitMenu(self)
+        self.cb.status("Conferindo as iscas no inventário...")
+        try:
+            menu.open()
+            infos = {name: menu.inspect(name) for name in order}
+            st = self.baits
+            st.owned = [n for n, i in infos.items() if i.owned]
+            st.counts = {n: (None if n in infinite else i.count) for n, i in infos.items() if i.owned}
+            before = next((n for n, i in infos.items() if i.equipped), None)
+            st.equipped = before
+            log.info("Iscas no inventário: %s | equipada: %s",
+                     {n: ("não tem" if not i.owned else i.count) for n, i in infos.items()}, before)
+            self._switch_bait_if_needed(menu, order, infinite, before)
+            st.mark_checked()
+        except bait_menu.MenuError as exc:
+            log.error("Conferência de iscas falhou: %s", exc)
+            logbook.save_evidence(self._safe_shot(), "iscas " + str(exc))
+            self._bait_retry_at = self.cycles + BAIT_RETRY_CYCLES
+        finally:
+            try:
+                menu.close()
+            except bait_menu.MenuError:
+                log.exception("Não consegui fechar o menu")
+            if self.bait_path is not None:
+                self.baits.save(self.bait_path)
+            self._report_bait()
+
+    def _switch_bait_if_needed(self, menu, order: list[str], infinite: list[str], current: str | None) -> None:
+        st = self.baits
+        best = st.choose(order, infinite)
+        current_ok = current is not None and st.usable(current, infinite)
+        better = (best is not None and current in order and order.index(best) < order.index(current))
+        if best is None:
+            if not self._no_bait_warned:
+                self._no_bait_warned = True
+                msg = "Acabaram as iscas: continuando a pescar sem isca. Compre mais quando voltar."
+                log.warning(msg)
+                self._notify("⚠️ " + msg)
+            return
+        if best == current or (current_ok and not better):
+            return
+        if not menu.equip(best):
+            log.error("Não consegui equipar a isca %s", best)
+            logbook.save_evidence(self._safe_shot(), "equipar isca")
+            return
+        st.equipped = best
+        if current and not current_ok:
+            msg = f"A isca {current} acabou: troquei para {best}. Compre mais quando voltar."
+        else:
+            msg = f"Isca trocada: {current or 'nenhuma'} → {best}."
+        log.warning(msg)
+        self._notify("🎣 " + msg)
+        self.cb.status(msg)
+
     def one_cycle(self) -> None:
         self.cycles += 1
         log.debug("---- ciclo %d ----", self.cycles)
+        cycle_start = time.perf_counter()
+        self._maybe_check_baits()
         self.ensure_rod()
         self.check_camera()
         self.cast()
@@ -431,6 +520,12 @@ class Fisher:
         self.failed_casts = 0
         self.recoveries = 0
         self.collect()
+        if self._baits_on():
+            # o jogo gasta 1 isca a cada mordida resolvida (pegando ou não)
+            self.baits.consume(time.perf_counter() - cycle_start, self.cfg["baits"]["infinite"])
+            if self.bait_path is not None:
+                self.baits.save(self.bait_path)
+            self._report_bait()
         if self.cycles % STATS_EVERY_CYCLES == 0:
             self._log_stats()
 
@@ -479,6 +574,7 @@ class Fisher:
                  window.client_rect(self.hwnd), self.cfg["cast_point"], self.cfg["scan_area"],
                  bool(self.cfg.get("compass_lock")) and self.compass.ready)
         reason = "Parado."
+        self._report_bait()
         try:
             while True:
                 try:

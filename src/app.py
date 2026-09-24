@@ -16,6 +16,7 @@ import config
 import logbook
 import screen
 import window
+from baits import BaitState
 from catalog import Catalog
 from compass import CompassLock
 from cycle import Callbacks, Fisher
@@ -25,6 +26,7 @@ from tabs import MUTED, RARITY_HEX, AdvancedTab, DiscordTab, SessionTab, SetupTa
 from webhook import DiscordNotifier
 
 COMPASS_FILE = config.CALIBRATION_DIR / "bussola.npz"
+BAIT_FILE = config.CALIBRATION_DIR / "iscas.json"
 SAVE_DELAY_MS = 400
 PUMP_MS = 30
 TICK_MS = 1000
@@ -51,6 +53,9 @@ class App(ctk.CTk):
         self.compass = CompassLock()
         self.compass.load(COMPASS_FILE)
         self.catalog = Catalog(config.CATALOG_DIR, config.CATALOG_LOCAL_DIR)
+        self.baits = BaitState.load(BAIT_FILE)
+        self._fisher: Fisher | None = None
+        self._bait_check_pending = False
         self._posted: queue.SimpleQueue = queue.SimpleQueue()
         self.notifier = DiscordNotifier(on_error=lambda m: self.post(lambda: self.set_status(f"Discord: {m}")))
         self.apply_discord()
@@ -97,6 +102,10 @@ class App(ctk.CTk):
             self.stat_labels[key] = value
             if key == "tracked":
                 self._tracked_title = title
+
+        self.bait_label = ctk.CTkLabel(self, text="", anchor="w", font=ctk.CTkFont(size=12))
+        self.bait_label.pack(fill="x", padx=18, pady=(4, 0))
+        self._show_bait(self.baits.summary(self.cfg["baits"]["infinite"]), self.baits.warning)
 
         self.tabs = ctk.CTkTabview(self, corner_radius=12)
         self.tabs.pack(fill="both", expand=True, padx=14, pady=6)
@@ -228,8 +237,13 @@ class App(ctk.CTk):
         self.session.start()
         self._render_running()
         cb = Callbacks(status=lambda m: self.post(lambda: self.set_status(m)),
-                       loot=lambda items, snap: self.post(lambda: self._on_loot(items, snap)))
-        fisher = Fisher(copy.deepcopy(self.cfg), cb, self.session, self.notifier, self.compass, self.catalog)
+                       loot=lambda items, snap: self.post(lambda: self._on_loot(items, snap)),
+                       bait=lambda text, warn: self.post(lambda: self._show_bait(text, warn)))
+        fisher = Fisher(copy.deepcopy(self.cfg), cb, self.session, self.notifier, self.compass, self.catalog,
+                        baits=self.baits, bait_path=BAIT_FILE)
+        fisher.bait_check_requested = self._bait_check_pending
+        self._bait_check_pending = False
+        self._fisher = fisher
         threading.Thread(target=self._run_worker, args=(fisher,), daemon=True).start()
 
     def _run_worker(self, fisher: Fisher) -> None:
@@ -242,6 +256,21 @@ class App(ctk.CTk):
     def open_logs(self) -> None:
         config.LOG_DIR.mkdir(parents=True, exist_ok=True)
         os.startfile(config.LOG_DIR)
+
+    def _show_bait(self, text: str, warn: bool) -> None:
+        if not self.cfg["baits"].get("enabled", True):
+            self.bait_label.configure(text="")
+            return
+        self.bait_label.configure(text=("⚠️ " if warn else "🎣 ") + text,
+                                  text_color=AMBER if warn else MUTED)
+
+    def request_bait_check(self) -> None:
+        if self._running and self._fisher is not None:
+            self._fisher.bait_check_requested = True
+            self.set_status("Vou conferir as iscas no começo do próximo ciclo.")
+        else:
+            self._bait_check_pending = True
+            self.set_status("Vou conferir as iscas quando você iniciar a pesca.")
 
     def new_session(self) -> None:
         """Zera tempo e contagens (o CSV da sessão anterior continua salvo em logs/)."""

@@ -1,0 +1,145 @@
+"""Leitura da tela do inventário (menu M → Inventory → Fishing).
+
+A quantidade de cada item fica numa "pílula" branca no canto do quadrado
+("x662"). O OCR do Windows erra números curtos, então tentamos dois recortes:
+1. só as letras escuras cercadas de branco (quando o desenho do item encosta na pílula);
+2. a pílula inteira, em vários tamanhos.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+import cv2
+import numpy as np
+
+import ocr
+
+COUNT_RE = re.compile(r"^[^0-9]{0,2}(\d{1,5})$")
+PILL_WHITE_MIN = 190
+LETTER_H_FRAC = (0.12, 0.35)       # altura de uma letra da pílula / altura do quadrado
+OCR_SCALES = (4, 6, 3, 8)
+# Quadrado sozinho depois de buscar: fundo colorido, bem mais claro que o fundo do menu.
+TILE_MIN_BRIGHTNESS = 45
+TILE_MIN_SIDE_FRAC = 0.02          # lado mínimo do quadrado em fração da largura do jogo
+
+
+@dataclass(frozen=True)
+class Box:
+    x: int
+    y: int
+    w: int
+    h: int
+
+    @property
+    def center(self) -> tuple[int, int]:
+        return self.x + self.w // 2, self.y + self.h // 2
+
+
+def find_line(lines: list[ocr.Line], pattern: str) -> ocr.Line | None:
+    """Primeira linha lida que contém o padrão (sem diferenciar maiúsculas)."""
+    rx = re.compile(pattern, re.IGNORECASE)
+    return next((line for line in lines if rx.search(line.text)), None)
+
+
+def _parse_count(text: str) -> int | None:
+    clean = text.replace(" ", "").replace("O", "0").replace("o", "0")
+    m = COUNT_RE.match(clean)
+    return int(m.group(1)) if m else None
+
+
+def _ocr_count(gray: np.ndarray) -> int | None:
+    for scale in OCR_SCALES:
+        big = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        big = cv2.copyMakeBorder(big, 20, 20, 40, 40, cv2.BORDER_CONSTANT, value=255)
+        for line in ocr.read_lines(cv2.cvtColor(big, cv2.COLOR_GRAY2BGR), min_height=1):
+            count = _parse_count(line.text)
+            if count is not None:
+                return count
+    return None
+
+
+def _ink_only(corner: np.ndarray, tile_h: int) -> np.ndarray | None:
+    """Imagem limpa (preto no branco) só com as letras escuras cercadas de branco."""
+    white = (corner.min(axis=2) >= PILL_WHITE_MIN).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(1 - white, connectivity=4)
+    ch, cw = white.shape
+    letters = []
+    for i in range(1, n):
+        x, y, w, h, _ = stats[i]
+        if x == 0 or y == 0 or x + w >= cw or y + h >= ch:
+            continue
+        if LETTER_H_FRAC[0] * tile_h <= h <= LETTER_H_FRAC[1] * tile_h:
+            letters.append((x, y, w, h, i))
+    if not letters:
+        return None
+    tallest = max(letters, key=lambda b: b[3])
+    mid = tallest[1] + tallest[3] / 2
+    letters = [b for b in letters if abs(b[1] + b[3] / 2 - mid) <= tallest[3] / 2]
+    x0, y0 = min(b[0] for b in letters), min(b[1] for b in letters)
+    x1, y1 = max(b[0] + b[2] for b in letters), max(b[1] + b[3] for b in letters)
+    img = np.full((y1 - y0, x1 - x0), 255, np.uint8)
+    for x, y, w, h, i in letters:
+        img[y - y0:y - y0 + h, x - x0:x - x0 + w][labels[y:y + h, x:x + w] == i] = 0
+    return img
+
+
+def _pill(corner: np.ndarray) -> np.ndarray | None:
+    white = (corner.min(axis=2) >= PILL_WHITE_MIN).astype(np.uint8)
+    n, _, stats, _ = cv2.connectedComponentsWithStats(white)
+    if n < 2:
+        return None
+    i = 1 + int(np.argmax(stats[1:, 4]))
+    x, y, w, h, _ = stats[i]
+    if w < 12 or h < 8:
+        return None
+    return cv2.cvtColor(corner[y:y + h, x:x + w], cv2.COLOR_BGR2GRAY)
+
+
+def read_count(tile: np.ndarray) -> int | None:
+    """Quantidade na pílula do quadrado ("x662" -> 662). None = sem pílula ou não deu para ler."""
+    th, tw = tile.shape[:2]
+    corner = tile[:int(th * 0.45), int(tw * 0.25):]
+    ink = _ink_only(corner, th)
+    if ink is not None:
+        count = _ocr_count(ink)
+        if count is not None:
+            return count
+    pill = _pill(corner)
+    return _ocr_count(pill) if pill is not None else None
+
+
+def has_bait_badge(tile: np.ndarray) -> bool:
+    """O quadrado tem o selo "✓ Bait" embaixo (isca equipada)?"""
+    th = tile.shape[0]
+    bottom = cv2.cvtColor(tile[int(th * 0.62):, :], cv2.COLOR_BGR2GRAY)
+    for scale in (3, 5):
+        big = cv2.resize(bottom, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        if any("bait" in line.text.lower() for line in ocr.read_lines(cv2.cvtColor(big, cv2.COLOR_GRAY2BGR))):
+            return True
+    return False
+
+
+def find_single_tile(frame: np.ndarray, search: ocr.Line) -> Box | None:
+    """Depois de buscar um nome, sobra (no máximo) um quadrado logo abaixo da busca."""
+    fh, fw = frame.shape[:2]
+    side = int(search.h * 4.5)
+    x0 = max(0, search.x - side // 2)
+    y0 = min(fh, search.y + search.h + search.h // 2)
+    region = frame[y0:min(fh, y0 + int(side * 1.6)), x0:min(fw, x0 + int(side * 2.2))]
+    if region.size == 0:
+        return None
+    bright = (cv2.cvtColor(region, cv2.COLOR_BGR2GRAY) >= TILE_MIN_BRIGHTNESS).astype(np.uint8)
+    bright = cv2.morphologyEx(bright, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    n, _, stats, _ = cv2.connectedComponentsWithStats(bright)
+    min_side = TILE_MIN_SIDE_FRAC * fw
+    best = None
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if w >= min_side and h >= min_side and 0.7 <= w / h <= 1.4:
+            if best is None or area > best[4]:
+                best = (x, y, w, h, area)
+    if best is None:
+        return None
+    x, y, w, h, _ = best
+    return Box(x0 + x, y0 + y, w, h)

@@ -20,6 +20,7 @@ MOUSEEVENTF_LEFTUP = 0x0004
 NUDGE_SEC = 0.02
 SETTLE_SEC = 0.05
 CLICK_HOLD_SEC = 0.05
+TYPE_DELAY_SEC = 0.04
 
 
 class _MOUSEINPUT(ctypes.Structure):
@@ -96,6 +97,10 @@ def tap_key(key: str, hold_sec: float = 0.08) -> None:
     keyboard.press(key)
     time.sleep(hold_sec)
     keyboard.release(key)
+
+
+def type_text(text: str) -> None:
+    keyboard.write(text, delay=TYPE_DELAY_SEC)
 
 
 def press_key(key: str) -> None:
