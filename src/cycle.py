@@ -22,22 +22,20 @@ import bait_menu
 import hotbar
 import logbook
 import loot as loot_mod
-import minigame as minigame_mod
 import prompt as prompt_mod
 import screen
 import window
+from bar_control import TrackController
+from bar_detect import Detector
 from baits import BaitState
 from catalog import Catalog
 from compass import CompassLock
 from session import Session
 from webhook import DiscordNotifier, LootReport
 
-# Folga em volta da área da barra (fração da largura/altura dela).
-BAR_PAD_X, BAR_PAD_Y = 0.6, 0.05
+SEARCH_PAD_X, SEARCH_PAD_X_MIN = 1.5, 80
+SEARCH_PAD_Y, SEARCH_PAD_Y_MIN = 0.125, 24
 START_HITS = 2
-# Diagnóstico: salva recortes da barra nos primeiros minigames de cada sessão.
-DIAG_MINIGAMES = 3
-DIAG_EVERY_SEC = 0.5
 RELEASE_AFTER_LOST_SEC = 0.3
 POPUP_POLL_SEC = 0.25
 COLLECT_POLL_SEC = 0.05
@@ -77,6 +75,14 @@ class Callbacks:
     bait: Callable[[str, bool], None] = field(default=lambda text, warn: None)
 
 
+@dataclass(frozen=True)
+class PixelRect:
+    x: int
+    y: int
+    w: int
+    h: int
+
+
 class Fisher:
     def __init__(self, cfg: dict, cb: Callbacks, session: Session,
                  notifier: DiscordNotifier, compass: CompassLock,
@@ -94,8 +100,8 @@ class Fisher:
         self.session = session
         self.notifier = notifier
         self.compass = compass
-        self.bar = minigame_mod.BarController()
-        self.minigames_seen = 0
+        self.detector = Detector()
+        self.tracker = TrackController()
         self.mouse = screen.MouseButton()
         self.grabber: screen.Grabber | None = None
         self.hwnd: int | None = None
@@ -217,59 +223,72 @@ class Fisher:
             raise Recoverable(f"o mouse não chegou no ponto de lançamento ({x}, {y})", self._safe_shot())
         self.sleep(self.t("after_cast_sec"))
 
-    def _bar_rect(self, r: window.Rect) -> window.Rect:
-        """Área da barra do minigame (com uma folga dos lados), em coordenadas de tela."""
+    def _scan_rect(self, r: window.Rect) -> PixelRect:
         sa = self.cfg["scan_area"]
-        w, h = max(1, int(sa["w"] * r.w)), max(1, int(sa["h"] * r.h))
-        pad_x, pad_y = int(w * BAR_PAD_X), int(h * BAR_PAD_Y)
-        x0 = max(r.x, int(r.x + sa["x"] * r.w) - pad_x)
-        y0 = max(r.y, int(r.y + sa["y"] * r.h) - pad_y)
-        x1 = min(r.x + r.w, int(r.x + sa["x"] * r.w) + w + pad_x)
-        y1 = min(r.y + r.h, int(r.y + sa["y"] * r.h) + h + pad_y)
-        return window.Rect(x0, y0, max(1, x1 - x0), max(1, y1 - y0))
+        return PixelRect(int(r.x + sa["x"] * r.w), int(r.y + sa["y"] * r.h),
+                         max(1, int(sa["w"] * r.w)), max(1, int(sa["h"] * r.h)))
+
+    @staticmethod
+    def _search_rect(r: window.Rect, s: PixelRect) -> PixelRect:
+        px = max(SEARCH_PAD_X_MIN, int(SEARCH_PAD_X * s.w))
+        py = max(SEARCH_PAD_Y_MIN, int(SEARCH_PAD_Y * s.h))
+        x0, y0 = max(r.x, s.x - px), max(r.y, s.y - py)
+        x1, y1 = min(r.x + r.w, s.x + s.w + px), min(r.y + r.h, s.y + s.h + py)
+        return PixelRect(x0, y0, max(1, x1 - x0), max(1, y1 - y0))
 
     def minigame(self) -> bool:
         """Joga o minigame. True = terminou (ir coletar); False = nem começou."""
-        self.bar.configure(self.cfg["tracking"])
-        self.bar.reset()
+        self.tracker.configure(self.cfg["tracking"])
         frame_budget = 1.0 / max(5.0, float(self.cfg["tracking"]["task_fps"]))
-        begin = time.perf_counter()
-        start_deadline = begin + self.t("minigame_start_timeout_sec")
+        start_deadline = time.perf_counter() + self.t("minigame_start_timeout_sec")
+        end_deadline = time.perf_counter() + self.t("minigame_max_sec")
         lost_sec = self.t("ball_lost_sec")
-        started, hits, last_seen, started_at, next_diag = False, 0, 0.0, 0.0, 0.0
+        started, hits, last_game, near, last_seen = False, 0, None, None, 0.0
         self.mouse.release()
         self.cb.status("Esperando o peixe morder...")
         try:
             while True:
                 t0 = time.perf_counter()
                 r = self.rect()
-                img = self.grabber.grab(self._bar_rect(r))
-                reading = minigame_mod.read_bar(img)
+                scan = self._scan_rect(r)
+                search = self._search_rect(r, scan)
+                img = self.grabber.grab(window.Rect(search.x, search.y, search.w, search.h))
+                game = self.detector.find(img, (search.x, search.y), near)
                 now = time.perf_counter()
+                if game is not None and not started and not (
+                    scan.x - game.ball_w <= game.ball_x <= scan.x + scan.w + game.ball_w
+                ):
+                    game = None
                 if not started:
-                    # começa só com quadrado E zona verde em leituras seguidas (espuma branca na água não conta)
-                    hits = hits + 1 if reading is not None and reading.has_zone else 0
-                    if hits >= START_HITS:
-                        started, last_seen, started_at = True, now, now
-                        log.info("Peixe mordeu após %.1fs (quadrado %dpx)", now - begin, reading.ball_h)
-                        self.cb.status("Minigame!")
-                    elif now >= start_deadline:
+                    if game is not None and (last_game is None or abs(game.ball_x - last_game.ball_x) <= game.ball_w):
+                        hits += 1
+                        if hits >= START_HITS:
+                            started, last_seen = True, now
+                            near = (game.ball_x, game.ball_y)
+                            self.tracker.start(game.ball_y, game.zone_y, game.ball_h, now)
+                            end_deadline = now + self.t("minigame_max_sec")
+                            waited = now - (start_deadline - self.t("minigame_start_timeout_sec"))
+                            log.info("Peixe mordeu após %.1fs (quadrado %dpx)", waited, game.ball_h)
+                            self.cb.status("Minigame!")
+                    else:
+                        hits = 1 if game is not None else 0
+                    last_game = game
+                    if not started and now >= start_deadline:
                         logbook.save_evidence(self.grabber.grab(r), "sem minigame")
                         return False
                 else:
-                    if reading is None:
+                    if game is None:
                         if now - last_seen > lost_sec:
-                            log.info("Minigame terminou (%.1fs)", now - started_at)
+                            log.info("Minigame terminou (%.1fs)",
+                                     now - (end_deadline - self.t("minigame_max_sec")))
                             return True
                         if now - last_seen > RELEASE_AFTER_LOST_SEC:
                             self.mouse.set(False)
                     else:
-                        last_seen = now
-                        self.mouse.set(self.bar.update(reading, now))
-                    if self.minigames_seen < DIAG_MINIGAMES and now >= next_diag:
-                        logbook.save_minigame_frame(img, reading, self.mouse.held)
-                        next_diag = now + DIAG_EVERY_SEC
-                    if now - started_at >= self.t("minigame_max_sec"):
+                        last_seen, near = now, (game.ball_x, game.ball_y)
+                        self.tracker.observe(game.ball_y, game.ball_h, game.zone_top, game.zone_y, now)
+                        self.mouse.set(bool(self.tracker.decide(now)))
+                    if now >= end_deadline:
                         log.warning("Minigame passou do tempo máximo: indo coletar mesmo assim.")
                         return True
                 leftover = frame_budget - (time.perf_counter() - t0)
@@ -279,8 +298,6 @@ class Fisher:
                     self._check_stop()
         finally:
             self.mouse.release()
-            if started:
-                self.minigames_seen += 1
 
     def _poll_new(self, before: list[loot_mod.Loot], until: float
                   ) -> tuple[list[loot_mod.Loot], np.ndarray | None]:

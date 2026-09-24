@@ -54,10 +54,13 @@ DEFAULTS: dict = {
     },
     "tracking": {
         "task_fps": 30.0,
-        "lead_s": 0.02,          # atraso extra previsto (além do tempo entre leituras)
-        "deadband": 0.05,        # zona morta em volta do meio da zona verde (fração)
-        "accel": 37.5,           # aceleração do quadrado (alturas do quadrado por s²)
-        "zone_memory_s": 1.0,    # usa a última zona vista por esse tempo
+        "accel_hold": 900.0,
+        "accel_release": 900.0,
+        "ball_ref_px": 24.0,
+        "latency_s": 0.10,
+        "hysteresis_px": 6.0,
+        "aim_offset": 0.0,
+        "zone_hold_s": 1.0,
     },
     "baits": {
         "enabled": True,

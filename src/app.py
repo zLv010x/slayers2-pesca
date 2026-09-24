@@ -272,16 +272,6 @@ class App(ctk.CTk):
             reason = f"Erro inesperado: {exc}"
         self.post(lambda: self._on_stopped(reason))
 
-    def export_logs(self) -> None:
-        """Gera o ZIP para mandar quando algo der errado (sem o link do webhook)."""
-        try:
-            out = logbook.export_bundle(config.ROOT, config.ROOT / "logs_para_enviar")
-        except OSError as exc:
-            self.set_status(f"Não consegui exportar os logs: {exc}")
-            return
-        self.set_status(f"Logs exportados: {out.name} (pasta logs_para_enviar). Pode mandar esse arquivo.")
-        os.startfile(out.parent)
-
     def open_logs(self) -> None:
         config.LOG_DIR.mkdir(parents=True, exist_ok=True)
         os.startfile(config.LOG_DIR)
