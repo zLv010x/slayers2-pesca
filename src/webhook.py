@@ -64,25 +64,11 @@ class LootReport:
     session_count: int      # quantos itens já pegou nesta sessão
     item_total: int         # quantos desse item nesta sessão
     tracked_name: str       # item acompanhado em todas as mensagens (ex.: "Ore")
-    tracked_total: int      # total dos itens com esse nome na sessão (Ore + Refinement Ore...)
+    tracked_total: int      # total desse item na sessão
     elapsed: str            # tempo de macro rodando, ex.: "1h 05m"
     image: np.ndarray | None
     is_new: bool = False    # primeira vez na coleção (selo NEW! do jogo)
     first_in_catalog: bool = False  # item que o catálogo da macro ainda não conhecia
-    tracked_detail: str = ""        # de onde vem o total, ex.: "Refinement Ore 2 • Ore 1"
-
-
-TRACKED_DETAIL_MAX = 5  # campo do Discord aceita até 1024 caracteres: palavra comum ("Fish") estouraria
-
-
-def tracked_detail(parts: dict[str, int]) -> str:
-    """ "Refinement Ore 17 • Ore 2" (os maiores primeiro; o resto vira "+N"). Vazio se for um só."""
-    if len(parts) < 2:
-        return ""
-    top = sorted(parts.items(), key=lambda kv: -kv[1])
-    text = " • ".join(f"{n} {q}" for n, q in top[:TRACKED_DETAIL_MAX])
-    rest = len(top) - TRACKED_DETAIL_MAX
-    return text + (f" • +{rest}" if rest > 0 else "")
 
 
 def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], when: datetime) -> dict:
@@ -93,8 +79,7 @@ def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], whe
         {"name": "Itens na sessão", "value": str(report.session_count), "inline": True},
     ]
     if report.tracked_name:
-        value = str(report.tracked_total) + (f" ({report.tracked_detail})" if report.tracked_detail else "")
-        fields.append({"name": f"{report.tracked_name} total", "value": value, "inline": True})
+        fields.append({"name": f"{report.tracked_name} total", "value": str(report.tracked_total), "inline": True})
     fields.append({"name": "Tempo rodando", "value": report.elapsed, "inline": True})
     embed = {
         "title": ("🆕 " if report.is_new else "") + f"{report.name}  x{report.quantity}",

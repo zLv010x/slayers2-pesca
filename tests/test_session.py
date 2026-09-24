@@ -153,11 +153,9 @@ def test_historico_guarda_a_noite_inteira():
     assert [n for _, n, _, _ in s.recent({"mythic"})] == ["Ore"]
 
 
-def test_item_acompanhado_soma_todos_com_a_palavra_no_nome():
-    """Pedido de 24/09: "Ore" ficava 0 com 17 Refinement Ore (só contava o nome exato)."""
+def test_ore_conta_so_o_item_ore():
+    """Pedido de 24/09: Refinement Ore (rare) e Ore (mythic) são itens diferentes."""
     s = Session()
-    for name in ("Refinement Ore", "Refinement Ore", "Ore", "Golden Fish", "Coral", "Orecchio"):
+    for name in ("Refinement Ore", "Refinement Ore", "Ore", "ore"):
         s.record(name, 1, "rare")
-    assert s.tracked_breakdown("ore") == {"Refinement Ore": 2, "Ore": 1}
-    assert s.tracked_breakdown("") == {}
-    assert s.total_of("Ore") == 1  # o total do próprio item continua exato
+    assert s.total_of("Ore") == 2

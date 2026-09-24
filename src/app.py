@@ -342,7 +342,7 @@ class App(ctk.CTk):
         self.stat_labels["Tempo"].configure(text=s.elapsed_text() if s.elapsed_seconds() >= 1 else "-")
         self.stat_labels["Itens"].configure(text=str(s.catches))
         self._tracked_title.configure(text=tracked or "Item")
-        self.stat_labels["tracked"].configure(text=str(sum(s.tracked_breakdown(tracked).values())) if tracked else "-")
+        self.stat_labels["tracked"].configure(text=str(s.total_of(tracked)) if tracked else "-")
         self.stat_labels["Perdidos"].configure(text=str(s.misses))
         self.session_tab.refresh()
 

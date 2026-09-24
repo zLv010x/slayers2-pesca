@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import csv
-import re
 import threading
 import time
 from collections import Counter
@@ -68,16 +67,6 @@ class Session:
         key = name.strip().lower()
         with self._lock:
             return sum(q for n, q in self.counts.items() if n.lower() == key)
-
-    def tracked_breakdown(self, word: str) -> dict[str, int]:
-        """Itens com essa palavra no nome e quanto de cada ("Ore" -> Ore, Refinement Ore)."""
-        word = word.strip()
-        if not word:
-            return {}
-        pattern = re.compile(rf"\b{re.escape(word)}\b", re.IGNORECASE)
-        with self._lock:
-            found = {n: q for n, q in self.counts.items() if pattern.search(n)}
-        return dict(sorted(found.items(), key=lambda kv: -kv[1]))
 
     def record(self, name: str, quantity: int, rarity: str) -> None:
         now = datetime.now()

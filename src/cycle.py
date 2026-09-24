@@ -36,7 +36,7 @@ from compass import CompassLock
 from restart_policy import RestartPolicy
 from session import Session
 from stops import Relogged, StopRun
-from webhook import DiscordNotifier, LootReport, tracked_detail
+from webhook import DiscordNotifier, LootReport
 
 SEARCH_PAD_X, SEARCH_PAD_X_MIN = 1.5, 80
 SEARCH_PAD_Y, SEARCH_PAD_Y_MIN = 0.125, 24
@@ -652,7 +652,6 @@ class Fisher:
         self.session.record(item.name, item.quantity, item.rarity)
         d = self.cfg["discord"]
         tracked = str(d.get("tracked_item", "")).strip()
-        parts = self.session.tracked_breakdown(tracked)
         self.notifier.send_loot(LootReport(
             name=item.name,
             quantity=item.quantity,
@@ -660,12 +659,11 @@ class Fisher:
             session_count=self.session.catches,
             item_total=self.session.total_of(item.name),
             tracked_name=tracked,
-            tracked_total=sum(parts.values()),
+            tracked_total=self.session.total_of(tracked) if tracked else 0,
             elapsed=self.session.elapsed_text(),
             image=snap if d.get("send_image", True) else None,
             is_new=item.is_new,
             first_in_catalog=first_in_catalog,
-            tracked_detail=tracked_detail(parts),
         ))
         return item
 

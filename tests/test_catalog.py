@@ -369,3 +369,13 @@ def test_sem_imagem_no_compartilhado_usa_a_do_local(dirs):
     cat.record("Coral", "common", np.full((20, 60, 3), 5, np.uint8))
     card = cat.card_image("Coral")
     assert card is not None and int(card[0, 0, 0]) == 5
+
+
+
+def test_catalogo_do_repositorio_reconhece_o_ore_lido_torto():
+    """O Ore (mythic) lido "v?Ore"/"ROre" vira Ore; Refinement Ore continua outro item."""
+    from pathlib import Path
+    repo = Path(__file__).resolve().parent.parent / "catalogo"
+    cat = Catalog(repo, repo.with_name("sem_local_no_teste"))
+    assert cat.resolve("v?Ore") == "Ore" and cat.resolve("ROre") == "Ore"
+    assert cat.resolve("Refinement Ore") == "Refinement Ore"

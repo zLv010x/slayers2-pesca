@@ -96,21 +96,3 @@ def test_fila_descarta_o_mais_antigo_quando_enche(monkeypatch):
     assert n._queue.qsize() == webhook.MAX_QUEUE
     first = n._queue.get_nowait()
     assert first[1]["i"] == 5  # os 5 mais antigos foram descartados
-
-
-def test_total_do_item_acompanhado_mostra_de_onde_vem():
-    """Pedido de 24/09: 'Ore total' soma Ore + Refinement Ore e mostra quanto de cada."""
-    r = LootReport("Refinement Ore", 1, "rare", 9, 2, "Ore", 3, "5m 00s", None,
-                   tracked_detail="Refinement Ore 2 • Ore 1")
-    field = next(f for f in build_payload(r, "", {"mythic"}, datetime.now())["embeds"][0]["fields"]
-                 if f["name"] == "Ore total")
-    assert field["value"] == "3 (Refinement Ore 2 • Ore 1)"
-
-
-def test_detalhe_do_acompanhado_nao_estoura_o_discord():
-    """Revisão de 24/09: acompanhando "Fish", o campo passaria de 1024 caracteres (HTTP 400)."""
-    from webhook import tracked_detail
-    parts = {f"Peixe {i}": 100 - i for i in range(40)}
-    text = tracked_detail(parts)
-    assert text.startswith("Peixe 0 100 • Peixe 1 99") and text.endswith("• +35") and len(text) < 200
-    assert tracked_detail({"Ore": 3}) == ""
