@@ -34,3 +34,14 @@ def test_tempo_so_conta_enquanto_pesca(monkeypatch):
     agora[0] = 1030.0           # voltou a pescar 30 s
     assert s.elapsed_seconds() == 90
     assert s.elapsed_text() == "1m 30s"
+
+
+def test_config_antigo_com_20s_vira_10s(tmp_path):
+    import json
+    import config
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"timings": {"minigame_start_timeout_sec": 20.0}}), encoding="utf-8")
+    assert config.load(p)["timings"]["minigame_start_timeout_sec"] == 10.0
+    # quem escolheu outro valor mantém o seu
+    p.write_text(json.dumps({"timings": {"minigame_start_timeout_sec": 15.0}}), encoding="utf-8")
+    assert config.load(p)["timings"]["minigame_start_timeout_sec"] == 15.0

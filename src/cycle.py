@@ -38,7 +38,8 @@ POPUP_POLL_SEC = 0.25
 COLLECT_POLL_SEC = 0.05
 # Aviso de coleta sumido por mais que isso = o jogo zerou o progresso do T.
 # (um ou dois quadros sem achar o aviso não soltam o T à toa)
-PROMPT_LOST_SEC = 0.25
+PROMPT_LOST_SEC = 0.6
+PROMPT_LOST_CHECKS = 3
 # Se o aviso nunca aparecer nesse tempo, segura T "no escuro" (como a versão antiga).
 PROMPT_GRACE_SEC = 1.0
 HOLD_SLACK_SEC = 1.5
@@ -305,6 +306,7 @@ class Fisher:
         start = time.perf_counter()
         deadline = start + budget
         holding, hold_since, last_seen, seen_any, restarts = False, 0.0, -1.0, False, 0
+        misses = 0
         self.cb.status(f"Segurando T para pegar ({where})...")
         try:
             while time.perf_counter() < deadline:
@@ -316,8 +318,12 @@ class Fisher:
                     return fresh, img
                 now = time.perf_counter()
                 if prompt_mod.find_collect_prompt(img) is not None:
-                    seen_any, last_seen = True, now
-                prompt_on = seen_any and now - last_seen <= PROMPT_LOST_SEC
+                    seen_any, last_seen, misses = True, now, 0
+                else:
+                    misses += 1
+                # só considera que o aviso sumiu de verdade depois de várias checagens seguidas
+                lost = misses >= PROMPT_LOST_CHECKS and now - last_seen >= PROMPT_LOST_SEC
+                prompt_on = seen_any and not lost
                 blind = not seen_any and now - start >= PROMPT_GRACE_SEC
                 want = prompt_on or blind
                 if holding and (not want or now - hold_since > hold_need + HOLD_SLACK_SEC):

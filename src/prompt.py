@@ -24,6 +24,13 @@ ASPECT = (0.75, 1.33)
 FILL = (0.45, 0.85)           # branco / caixa (círculo cheio seria ~0,79 sem o T)
 HOLE_FRAC = (0.05, 0.40)      # área do "T" / área do círculo preenchido
 HOLE_CENTER_TOL = 0.30        # o "T" fica perto do centro do círculo
+# O "T" escuro sozinho (medido nos prints e no vídeo, em fração da largura do jogo).
+T_W_FRAC = (0.0025, 0.008)
+T_H_FRAC = (0.0035, 0.009)
+T_FILL = (0.35, 0.70)
+T_TOP_MIN = 0.85              # barra de cima ocupa quase toda a largura
+T_BOTTOM_MAX = 0.55           # embaixo só a haste
+T_STEM_CENTER_TOL = 0.20
 
 
 @dataclass(frozen=True)
@@ -52,12 +59,56 @@ def _hole_ok(comp: np.ndarray) -> bool:
             and abs(ys.mean() - (h - 1) / 2) <= HOLE_CENTER_TOL * h)
 
 
+def _is_t_glyph(glyph: np.ndarray) -> bool:
+    """Forma de "T": barra de cima larga e haste estreita no meio embaixo."""
+    h, w = glyph.shape
+    fill = glyph.sum() / float(w * h)
+    if not T_FILL[0] <= fill <= T_FILL[1]:
+        return False
+    top = glyph[:max(1, h // 4)].any(axis=0).mean()
+    bottom_rows = glyph[h * 2 // 3:]
+    bottom = bottom_rows.any(axis=0).mean()
+    if top < T_TOP_MIN or bottom > T_BOTTOM_MAX:
+        return False
+    cols = np.nonzero(bottom_rows.any(axis=0))[0]
+    return cols.size > 0 and abs(cols.mean() - (w - 1) / 2) <= T_STEM_CENTER_TOL * w
+
+
+def _find_t_glyph(white: np.ndarray, fw: int) -> tuple[int, int, int] | None:
+    """Acha o "T" escuro cercado de branco (serve para círculo e losango, mesmo grudado na vara)."""
+    dark = (1 - white).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(dark, connectivity=4)
+    rh, rw = dark.shape
+    wmin, wmax = T_W_FRAC[0] * fw, T_W_FRAC[1] * fw
+    hmin, hmax = T_H_FRAC[0] * fw, T_H_FRAC[1] * fw
+    for i in range(1, n):
+        x, y, w, h, _ = stats[i]
+        if x == 0 or y == 0 or x + w >= rw or y + h >= rh:
+            continue  # encosta na borda: não está cercado de branco
+        if not (wmin <= w <= wmax and hmin <= h <= hmax):
+            continue
+        if _is_t_glyph(labels[y:y + h, x:x + w] == i):
+            return x + w // 2, y + h // 2, int(max(w, h) * 2)
+    return None
+
+
 def find_collect_prompt(frame: np.ndarray) -> Prompt | None:
     fh, fw = frame.shape[:2]
     x0, x1 = int(REGION_X[0] * fw), int(REGION_X[1] * fw)
     y0, y1 = int(REGION_Y[0] * fh), int(REGION_Y[1] * fh)
     region = frame[y0:y1, x0:x1]
     white = (region.min(axis=2) >= WHITE_MIN).astype(np.uint8)
+    found = _find_by_shape(white, fw)
+    if found is None:
+        found = _find_t_glyph(white, fw)
+    if found is None:
+        return None
+    x, y, d = found
+    return Prompt(int(x0 + x), int(y0 + y), int(d))
+
+
+def _find_by_shape(white: np.ndarray, fw: int) -> tuple[int, int, int] | None:
+    """Círculo (ou losango) branco pequeno com um buraco no meio."""
     n, labels, stats, _ = cv2.connectedComponentsWithStats(white)
     dmin, dmax = DIAM_FRAC[0] * fw, DIAM_FRAC[1] * fw
     for i in range(1, n):
@@ -70,5 +121,5 @@ def find_collect_prompt(frame: np.ndarray) -> Prompt | None:
             continue
         comp = (labels[y:y + h, x:x + w] == i).astype(np.uint8)
         if _hole_ok(comp):
-            return Prompt(int(x0 + x + w // 2), int(y0 + y + h // 2), int(max(w, h)))
+            return x + w // 2, y + h // 2, int(max(w, h))
     return None

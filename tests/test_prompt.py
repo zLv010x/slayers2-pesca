@@ -25,3 +25,19 @@ def test_acha_na_resolucao_real_2560(shot):
 ])
 def test_sem_aviso_de_coleta(shot, name):
     assert find_collect_prompt(shot(name)) is None
+
+
+@pytest.mark.parametrize("name", [
+    "video_aviso_circulo.webp",       # antes de apertar T: círculo
+    "video_aviso_losango.webp",       # segurando T: vira losango com a seta de progresso
+    "video_losango_na_vara_1.webp",   # losango encostado na vara branca (falhava)
+    "video_losango_na_vara_2.webp",
+    "video_losango_na_vara_3.webp",
+])
+def test_acha_o_aviso_nos_quadros_do_video(shot, name):
+    assert find_collect_prompt(shot(name)) is not None
+
+
+@pytest.mark.parametrize("name", ["video_brilho_coleta.webp", "video_depois_coleta.webp"])
+def test_sem_aviso_depois_de_coletar_no_video(shot, name):
+    assert find_collect_prompt(shot(name)) is None

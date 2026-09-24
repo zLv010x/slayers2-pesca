@@ -34,7 +34,7 @@ DEFAULTS: dict = {
     },
     "timings": {
         "after_cast_sec": 0.3,
-        "minigame_start_timeout_sec": 20.0,
+        "minigame_start_timeout_sec": 10.0,
         "minigame_max_sec": 120.0,
         "ball_lost_sec": 1.5,
         "after_minigame_sec": 1.0,
@@ -63,7 +63,10 @@ DEFAULTS: dict = {
         "zone_hold_s": 1.0,
     },
     "ui": {"always_on_top": True, "show_recent": True},
+    "config_rev": 2,
 }
+CONFIG_REV = DEFAULTS["config_rev"]
+OLD_START_TIMEOUT = 20.0  # padrão da versão 1 do config
 
 
 def _merge(base: dict, data: dict) -> dict:
@@ -90,7 +93,18 @@ def load(path: Path = CONFIG_PATH) -> dict:
     except (OSError, json.JSONDecodeError):
         path.replace(path.with_suffix(".json.bak"))
         return copy.deepcopy(DEFAULTS)
-    return _merge(DEFAULTS, data) if isinstance(data, dict) else copy.deepcopy(DEFAULTS)
+    if not isinstance(data, dict):
+        return copy.deepcopy(DEFAULTS)
+    rev = data.get("config_rev", 1)
+    return _migrate(_merge(DEFAULTS, data), rev if isinstance(rev, int) else 1)
+
+
+def _migrate(cfg: dict, rev: int) -> dict:
+    """Atualiza padrões antigos que a pessoa nunca mudou."""
+    if rev < 2 and cfg["timings"]["minigame_start_timeout_sec"] == OLD_START_TIMEOUT:
+        cfg["timings"]["minigame_start_timeout_sec"] = DEFAULTS["timings"]["minigame_start_timeout_sec"]
+    cfg["config_rev"] = CONFIG_REV
+    return cfg
 
 
 def save(cfg: dict, path: Path = CONFIG_PATH) -> None:
