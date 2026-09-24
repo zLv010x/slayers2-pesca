@@ -16,6 +16,7 @@ from PIL import Image
 import config
 import logbook
 import screen
+import shortcut
 import window
 from baits import BaitState
 from catalog import Catalog
@@ -487,6 +488,7 @@ def main() -> None:
     log.info("Macro aberta.")
     window.ensure_dpi_awareness()
     window.set_app_id(APP_ID)
+    threading.Thread(target=shortcut.ensure, args=(config.ROOT,), daemon=True).start()
     App().mainloop()
     log.info("Macro fechada.")
 

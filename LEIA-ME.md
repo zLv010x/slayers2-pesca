@@ -10,7 +10,7 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
 ## Usar
 
 1. No Roblox: desligue **Screen Shake** e **Shift Lock**, equipe a vara e posicione a câmera como quer pescar.
-2. Abra `Iniciar.bat`.
+2. Abra o **Iniciar** (o atalho com a logo do peixe, criado pelo `Instalar.bat`). Se ele não aparecer, use o `Iniciar.bat`.
 3. Aba **Configurar**:
    - **Marcar ponto**: clique na água onde a vara deve lançar. A câmera (bússola) fica gravada junto.
    - **Tecla da vara**: o número do slot da vara na hotbar.

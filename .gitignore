@@ -11,3 +11,5 @@ catalogo_local/
 .vs/
 .vscode/
 *.slnx
+
+*.lnk
