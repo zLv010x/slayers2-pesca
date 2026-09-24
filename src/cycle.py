@@ -310,6 +310,7 @@ class Fisher:
 
         `drift` é a medição que o chamador já fez (evita gastar um quadro à toa).
         """
+        self._park_cursor_for_camera()
         if drift is None:
             drift = self._sweep_for_compass()
             if drift is None:
@@ -329,6 +330,13 @@ class Fisher:
             self._learn_gain(drift, dx, new_drift)
             drift = new_drift
         return abs(drift) <= tol
+
+    def _park_cursor_for_camera(self) -> None:
+        """O arrasto do botão direito vai para a janela embaixo do cursor: põe o cursor no
+        ponto de lançamento (dentro do jogo, nunca na party) antes de girar a câmera."""
+        pt = self.cfg.get("cast_point")
+        if pt:
+            screen.move_to(*self.to_screen(self.rect(), pt["x"], pt["y"]))
 
     def _anti_idle_tick(self, last_nudge: float, now: float) -> float:
         """Numa pausa longa, mexe o mouse 1px a cada `anti_idle_sec` (só com o Roblox na

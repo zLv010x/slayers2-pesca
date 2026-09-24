@@ -24,6 +24,15 @@ class FakeFisher(cycle.Fisher):
         return None, self._seq.pop(0)
 
 
+@pytest.fixture(autouse=True)
+def no_real_cursor(monkeypatch):
+    """Nenhum teste do ciclo pode mexer no cursor de verdade."""
+    moves = []
+    monkeypatch.setattr(cycle.screen, "move_to",
+                        lambda x, y: moves.append((x, y)) or cycle.screen.MoveResult(True, "ok", (x, y)))
+    return moves
+
+
 @pytest.fixture
 def presses(monkeypatch):
     keys = []
@@ -904,3 +913,18 @@ def test_recover_solta_botao_direito(monkeypatch):
     f.cfg["timings"]["recovery_wait_sec"] = 0
     f._recover("teste", None)
     assert released == [True]  # nunca deixa o botão direito preso, mesmo fora da câmera
+
+
+def test_camera_poe_o_cursor_no_ponto_de_lancamento_antes_de_girar(auto_camera_env, monkeypatch):
+    """O arrasto do botão direito vai para a janela embaixo do cursor: se ele estiver em cima
+    da janela da macro (ou longe, depois de um relog), a câmera do jogo não gira."""
+    compass = FakeCompassAuto(drift0=40, real_gain=0.5)
+    f = auto_camera_env(compass)
+    f.cfg["cast_point"] = {"x": 0.5, "y": 0.25}
+    f.rect = lambda: cycle.window.Rect(0, 0, 100, 100)
+    events = []
+    monkeypatch.setattr(cycle.screen, "move_to", lambda x, y: events.append(("move", x, y)))
+    monkeypatch.setattr(cycle.screen, "right_drag", lambda dx: events.append(("drag", dx)) or compass.apply_drag(dx))
+    assert f._auto_fix_camera(tol=6, drift=40)
+    assert events[0] == ("move", 50, 25)
+    assert all(e[0] == "drag" for e in events[1:])
