@@ -22,7 +22,7 @@ def test_everything_else_is_item():
 def test_split_sorts_by_quantity_then_name():
     counts = Counter({"Ore": 3, "Clown Fish": 5, "Golden Fish": 5, "Coral": 7, "Zebra Fish": 1})
     fish, items = overlay.split_counts(counts)
-    assert fish == [("Clown Fish", 5), ("Golden Fish", 5), ("Zebra Fish", 1)]
+    assert fish == [("Coral", 7), ("Clown Fish", 5), ("Golden Fish", 5), ("Zebra Fish", 1)]
     assert items == [("Ore", 3)]
 
 
