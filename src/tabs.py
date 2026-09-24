@@ -231,6 +231,11 @@ class SetupTab:
         self.on_top.pack(side="left")
         if cfg["ui"].get("always_on_top", True):
             self.on_top.select()
+        r = row(box)
+        self.minimize = ctk.CTkSwitch(r, text="Minimizar ao iniciar a pesca", command=self._save_minimize)
+        self.minimize.pack(side="left")
+        if cfg["ui"].get("minimize_on_start", True):
+            self.minimize.select()
         hint(box, "No Roblox: desligue Screen Shake e Shift Lock, senão a câmera mexe durante a pesca.")
         self.refresh()
 
@@ -261,6 +266,10 @@ class SetupTab:
 
     def _save_rod(self) -> None:
         self.app.cfg["rod_key"] = self.rod.get().strip()[:10]
+        self.app.save_soon()
+
+    def _save_minimize(self) -> None:
+        self.app.cfg["ui"]["minimize_on_start"] = bool(self.minimize.get())
         self.app.save_soon()
 
     def _save_on_top(self) -> None:

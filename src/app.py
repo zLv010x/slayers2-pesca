@@ -31,6 +31,7 @@ SAVE_DELAY_MS = 400
 PUMP_MS = 30
 TICK_MS = 1000
 FOCUS_DELAY_MS = 350
+MINIMIZE_DELAY_MS = 150
 SNAPSHOT_MAX_H = 60
 GREEN, GREEN_HOVER = "#16a34a", "#15803d"
 RED, RED_HOVER = "#dc2626", "#b91c1c"
@@ -66,6 +67,7 @@ class App(ctk.CTk):
         self._listening: str | None = None
         self._hotkey_handles: list = []
         self._picker_open = False
+        self._minimized_by_run = False
         self._snapshot = None  # mantém a imagem viva (senão o Tk apaga)
 
         self._build()
@@ -171,6 +173,20 @@ class App(ctk.CTk):
         except OSError as exc:
             self.set_status(f"Não consegui salvar o config: {exc}")
 
+    def _minimize(self) -> None:
+        try:
+            self.iconify()
+        except Exception:  # minimizar é conforto: nunca pode atrapalhar a pesca
+            logbook.get().exception("Não consegui minimizar a janela")
+
+    def _restore_window(self) -> None:
+        try:
+            self.deiconify()
+            self.lift()
+            self.apply_on_top()
+        except Exception:
+            logbook.get().exception("Não consegui restaurar a janela")
+
     def apply_on_top(self) -> None:
         self.attributes("-topmost", bool(self.cfg["ui"].get("always_on_top", True)))
 
@@ -245,6 +261,9 @@ class App(ctk.CTk):
         self._bait_check_pending = False
         self._fisher = fisher
         threading.Thread(target=self._run_worker, args=(fisher,), daemon=True).start()
+        if self.cfg["ui"].get("minimize_on_start", True):
+            self._minimized_by_run = True
+            self.after(MINIMIZE_DELAY_MS, self._minimize)
 
     def _run_worker(self, fisher: Fisher) -> None:
         try:
@@ -284,6 +303,9 @@ class App(ctk.CTk):
 
     def _on_stopped(self, reason: str) -> None:
         self._running = False
+        if self._minimized_by_run:
+            self._minimized_by_run = False
+            self._restore_window()
         self.session.pause()
         self._render_running()
         self.set_status(reason)
@@ -321,6 +343,7 @@ class App(ctk.CTk):
         if rect is None:
             return
         self._picker_open = True
+        self._minimize()
         # Espera o Roblox vir para frente e guarda a bússola antes de cobrir a tela.
         self.after(FOCUS_DELAY_MS, lambda: self._open_point_picker(rect))
 
@@ -333,6 +356,7 @@ class App(ctk.CTk):
 
         def done(point) -> None:
             self._picker_open = False
+            self._restore_window()
             if point is None:
                 self.set_status("Marcação cancelada.")
                 return
@@ -358,9 +382,11 @@ class App(ctk.CTk):
         if rect is None:
             return
         self._picker_open = True
+        self._minimize()
 
         def done(area) -> None:
             self._picker_open = False
+            self._restore_window()
             if area is None:
                 self.set_status("Ajuste cancelado.")
                 return

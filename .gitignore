@@ -7,3 +7,7 @@ config.json.*
 calibracao/
 logs/
 catalogo_local/
+# Arquivos do Visual Studio / VS Code
+.vs/
+.vscode/
+*.slnx

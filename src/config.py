@@ -69,7 +69,7 @@ DEFAULTS: dict = {
         "infinite": ["Drowned Lure"],   # iscas que não gastam
         "recheck_at": 10,               # confere o inventário quando faltarem isso
     },
-    "ui": {"always_on_top": True, "show_recent": True},
+    "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True},
     "config_rev": 2,
 }
 CONFIG_REV = DEFAULTS["config_rev"]
