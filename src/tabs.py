@@ -42,6 +42,8 @@ ADVANCED_FIELDS = {
         ("recovery_wait_sec", "Espera ao recuperar (s)", "Depois de um problema, espera isso e tenta de novo."),
         ("refocus_after_sec", "Trazer Roblox de volta após (s)",
          "Se outra janela ficar na frente, traz o jogo de volta depois disso. 0 = nunca."),
+        ("anti_idle_sec", "Anti-inatividade a cada (s)",
+         "Numa pausa longa, mexe o mouse 1px para o jogo não desconectar por ficar parado. 0 desliga."),
     ],
     "limits": [
         ("rod_retries", "Tentativas de equipar vara", "Se não equipar depois disso, para e avisa."),
@@ -203,6 +205,14 @@ class SetupTab:
             self.lock.select()
         app.number_entry(r, cfg, "compass_tolerance_px", width=50, cast=int).pack(side="right")
         ctk.CTkLabel(r, text="tolerância px", text_color=MUTED).pack(side="right", padx=6)
+        r = row(box)
+        self.auto_camera = ctk.CTkSwitch(r, text="Girar a câmera sozinha quando desviar",
+                                         command=self._save_auto_camera)
+        self.auto_camera.pack(side="left")
+        if cfg.get("auto_camera", True):
+            self.auto_camera.select()
+        hint(box, "Antes de pausar, tenta arrastar a câmera de volta (botão direito) sozinha; "
+                  "só pausa esperando você se não conseguir.")
 
         box = section(scroll, "Barra do minigame")
         r = row(box)
@@ -288,6 +298,10 @@ class SetupTab:
 
     def _save_lock(self) -> None:
         self.app.cfg["compass_lock"] = bool(self.lock.get())
+        self.app.save_soon()
+
+    def _save_auto_camera(self) -> None:
+        self.app.cfg["auto_camera"] = bool(self.auto_camera.get())
         self.app.save_soon()
 
     def _save_baits(self) -> None:

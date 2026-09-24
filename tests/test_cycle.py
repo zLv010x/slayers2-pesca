@@ -60,6 +60,7 @@ class FakeNotifier:
 
 def test_recupera_varias_vezes_e_so_desiste_no_limite(monkeypatch):
     monkeypatch.setattr(cycle.screen, "release_key", lambda k: None)
+    monkeypatch.setattr(cycle.screen, "release_right_button", lambda: None)
     monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
     f = FakeFisher([])
     f.notifier = FakeNotifier()
@@ -562,6 +563,7 @@ def test_camera_espera_botao_direito_soltar_depois_de_voltar(monkeypatch):
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
     f = FakeFisher([None, None])   # duas leituras: uma fora de tolerância, outra dentro
     f.compass = FakeCompass([50, 0])
+    f.cfg["auto_camera"] = False  # aqui queremos testar a pausa manual, não a correção sozinha
     f.cfg["timings"]["recovery_wait_sec"] = 999
     waited = []
     monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: waited.append(True))
@@ -582,6 +584,7 @@ def test_camera_sem_desvio_nao_espera_mouse_livre(monkeypatch):
 
 def test_recuperacao_no_menu_principal_para_de_vez_e_avisa(monkeypatch):
     monkeypatch.setattr(cycle.screen, "release_key", lambda k: None)
+    monkeypatch.setattr(cycle.screen, "release_right_button", lambda: None)
     monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
     monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: True)
@@ -599,6 +602,7 @@ def test_recuperacao_no_menu_principal_para_de_vez_e_avisa(monkeypatch):
 
 def test_recuperacao_fora_do_menu_segue_normal(monkeypatch):
     monkeypatch.setattr(cycle.screen, "release_key", lambda k: None)
+    monkeypatch.setattr(cycle.screen, "release_right_button", lambda: None)
     monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
     monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: False)
@@ -617,6 +621,7 @@ def test_bussola_sumida_por_causa_do_menu_para_em_vez_de_pausar_para_sempre(monk
     monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: checks.append(img) or len(checks) >= 2)
     f = FakeFisher([None] * 50)
     f.compass = FakeCompass([None] * 50)
+    f.cfg["auto_camera"] = False  # testando a checagem de menu na pausa, não a varredura
     f.notifier = FakeNotifier()
     with pytest.raises(cycle.StopRun):
         f.check_camera()
@@ -632,6 +637,7 @@ def test_camera_girada_nao_procura_menu(monkeypatch):
     monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: called.append(True) or False)
     f = FakeFisher([None] * 3)
     f.compass = FakeCompass([40, 40, 0])  # bússola achada, só girada: não é o menu
+    f.cfg["auto_camera"] = False  # testando a pausa manual (sem menu), não a correção sozinha
     f.check_camera()
     assert called == []
 
@@ -650,3 +656,251 @@ def test_aviso_nunca_visto_segura_quase_continuo_como_antes(collect_env):
         assert nxt - rel <= 0.2, (rel, nxt)
     for p, rel in zip(presses, releases[:-1]):
         assert rel - p >= cycle.MIN_T_HOLD_SEC
+
+
+# ---------------------------------------------------------------- anti-inatividade
+
+def test_anti_idle_so_manda_apos_o_intervalo_configurado(monkeypatch):
+    f = FakeFisher([])
+    f.hwnd = 1
+    f.cfg["timings"]["anti_idle_sec"] = 10.0
+    monkeypatch.setattr(cycle.window, "is_foreground", lambda hwnd: True)
+    nudges = []
+    monkeypatch.setattr(cycle.screen, "anti_idle_nudge", lambda: nudges.append(True))
+    last = f._anti_idle_tick(0.0, 5.0)   # ainda não passou o intervalo
+    assert last == 0.0 and nudges == []
+    last = f._anti_idle_tick(last, 10.0)  # completou o intervalo: manda e reinicia a contagem
+    assert last == 10.0 and nudges == [True]
+
+
+def test_anti_idle_nunca_manda_com_roblox_fora_da_frente(monkeypatch):
+    f = FakeFisher([])
+    f.hwnd = 1
+    f.cfg["timings"]["anti_idle_sec"] = 10.0
+    monkeypatch.setattr(cycle.window, "is_foreground", lambda hwnd: False)
+    nudges = []
+    monkeypatch.setattr(cycle.screen, "anti_idle_nudge", lambda: nudges.append(True))
+    f._anti_idle_tick(0.0, 10.0)
+    assert nudges == []
+
+
+def test_anti_idle_sem_hwnd_nao_confere_janela_nem_manda(monkeypatch):
+    f = FakeFisher([])
+    f.hwnd = None
+    f.cfg["timings"]["anti_idle_sec"] = 10.0
+    called = []
+    monkeypatch.setattr(cycle.window, "is_foreground", lambda hwnd: called.append(True) or True)
+    nudges = []
+    monkeypatch.setattr(cycle.screen, "anti_idle_nudge", lambda: nudges.append(True))
+    f._anti_idle_tick(0.0, 10.0)
+    assert called == [] and nudges == []
+
+
+def test_anti_idle_zero_desliga(monkeypatch):
+    f = FakeFisher([])
+    f.hwnd = 1
+    f.cfg["timings"]["anti_idle_sec"] = 0
+    monkeypatch.setattr(cycle.window, "is_foreground", lambda hwnd: True)
+    nudges = []
+    monkeypatch.setattr(cycle.screen, "anti_idle_nudge", lambda: nudges.append(True))
+    last = f._anti_idle_tick(0.0, 999.0)
+    assert nudges == [] and last == 0.0
+
+
+def test_recuperacao_manda_anti_idle_durante_espera_longa(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.screen, "release_key", lambda k: None)
+    monkeypatch.setattr(cycle.screen, "release_right_button", lambda: None)
+    monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: False)
+    monkeypatch.setattr(cycle.window, "is_foreground", lambda hwnd: True)
+    nudges = []
+    monkeypatch.setattr(cycle.screen, "anti_idle_nudge", lambda: nudges.append(True))
+    f = FakeFisher([])
+    f.hwnd = 1
+    f.notifier = FakeNotifier()
+    f.cfg["timings"]["recovery_wait_sec"] = 30.0
+    f.cfg["timings"]["anti_idle_sec"] = 12.0
+    f._recover("teste", None)
+    assert len(nudges) >= 2  # espera de 30s com anti-idle a cada 12s: manda mais de uma vez
+
+
+def test_ponto_fora_do_monitor_manda_anti_idle_na_espera(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.window, "is_foreground", lambda hwnd: True)
+    nudges = []
+    monkeypatch.setattr(cycle.screen, "anti_idle_nudge", lambda: nudges.append(True))
+    f = FakeFisher([])
+    f.hwnd = 1
+    f.cfg["timings"]["recovery_wait_sec"] = 999
+    f.cfg["timings"]["anti_idle_sec"] = 3.0
+    monitor_calls = []
+
+    def fake_on_monitor(x, y):
+        monitor_calls.append((x, y))
+        return len(monitor_calls) > 15  # demora bastante para "voltar" (espera fica longa)
+
+    monkeypatch.setattr(cycle.screen, "on_monitor", fake_on_monitor)
+    f.rect = lambda: cycle.window.Rect(0, 0, 100, 100)
+    f.cfg["cast_point"] = {"x": 0.5, "y": 0.5}
+    f._wait_cast_point_on_monitor()
+    assert nudges  # a pausa é maior que o intervalo de anti-inatividade: mandou pelo menos uma vez
+
+
+# ---------------------------------------------------------------- câmera automática
+
+class FakeCompassAuto:
+    """Bússola de mentira que reage de verdade ao arrasto, como uma câmera física: o
+    ganho/sentido "real" é escondido do código testado, que só descobre pela resposta."""
+
+    def __init__(self, drift0, real_gain=1 / 3, none_calls=0):
+        self.ready = True
+        self.pos = float(drift0)
+        self.real_gain = real_gain     # px de bússola corrigidos por px de arrasto (sinal real)
+        self.drags = []
+        self._none_calls = none_calls  # 1ªs leituras "sem bússola" (simula câmera fora da faixa)
+        self._reads = 0
+
+    def apply_drag(self, dx):
+        self.drags.append(dx)
+        self.pos -= dx * self.real_gain
+
+    def drift_px(self, img):
+        self._reads += 1
+        if self._reads <= self._none_calls:
+            return None
+        return int(round(self.pos))
+
+
+@pytest.fixture
+def auto_camera_env(monkeypatch):
+    """check_camera/_auto_fix_camera sem tela de verdade: o arrasto vira `apply_drag`
+    na bússola falsa, que responde de acordo com o ganho "real" escondido no teste."""
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+
+    def make(compass, frames=200):
+        monkeypatch.setattr(cycle.screen, "right_drag", lambda dx: compass.apply_drag(dx))
+        f = FakeFisher([None] * frames)
+        f.compass = compass
+        return f
+    return make
+
+
+def test_camera_converge_mesmo_com_ganho_inicial_errado(auto_camera_env):
+    compass = FakeCompassAuto(drift0=100, real_gain=0.05)  # precisa de arrastos bem maiores
+    f = auto_camera_env(compass)
+    assert f._camera_gain == cycle.AUTO_CAMERA_DEFAULT_GAIN  # chute inicial, ainda não aprendeu
+    ok = f._auto_fix_camera(tol=6, drift=100)
+    assert ok is True
+    assert abs(compass.pos) <= 6
+    assert f._camera_gain != cycle.AUTO_CAMERA_DEFAULT_GAIN  # aprendeu um ganho diferente
+    assert len(compass.drags) <= cycle.AUTO_CAMERA_MAX_TRIES
+
+
+def test_camera_converge_com_sentido_invertido(auto_camera_env):
+    # ganho "real" negativo: arrastar do jeito que o chute inicial manda piora o desvio
+    compass = FakeCompassAuto(drift0=80, real_gain=-0.2)
+    f = auto_camera_env(compass)
+    ok = f._auto_fix_camera(tol=6, drift=80)
+    assert ok is True
+    assert abs(compass.pos) <= 6
+    assert f._camera_gain < 0  # aprendeu que o sentido é o oposto do chute
+
+
+def test_camera_ja_dentro_da_tolerancia_nao_arrasta(auto_camera_env):
+    compass = FakeCompassAuto(drift0=4, real_gain=0.5)
+    f = auto_camera_env(compass)
+    ok = f._auto_fix_camera(tol=6, drift=4)
+    assert ok is True
+    assert compass.drags == []  # já estava dentro da tolerância: não mexeu em nada
+
+
+def test_camera_varre_quando_bussola_nao_encontrada(auto_camera_env):
+    # bússola só aparece depois de algumas voltas da varredura
+    compass = FakeCompassAuto(drift0=50, real_gain=0.4, none_calls=5)
+    f = auto_camera_env(compass)
+    ok = f._auto_fix_camera(tol=6, drift=None)
+    assert ok is True
+    assert abs(compass.pos) <= 6
+    # varreu pelo menos as 5 vezes que a bússola ficou escondida
+    assert len(compass.drags) >= 5
+
+
+def test_camera_desiste_da_varredura_apos_a_volta_inteira(auto_camera_env):
+    compass = FakeCompassAuto(drift0=50, real_gain=0.4, none_calls=999)  # nunca aparece
+    f = auto_camera_env(compass)
+    ok = f._auto_fix_camera(tol=6, drift=None)
+    assert ok is False
+    assert len(compass.drags) == cycle.AUTO_CAMERA_SWEEP_STEPS  # tentou a volta inteira, não mais
+
+
+def test_camera_desiste_do_ajuste_fino_e_cai_na_pausa(monkeypatch):
+    """Ganho aprendido zera o movimento (drag sempre 0): desiste sem travar."""
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    f = FakeFisher([None] * 5)
+    f.compass = FakeCompass([80])  # só a 1ª leitura, feita pelo check_camera
+    f._camera_gain = 0.0  # nenhum arrasto corrige nada: precisa desistir, não travar
+    paused = []
+    monkeypatch.setattr(f, "_pause_for_camera", lambda tol, drift, img: paused.append(drift))
+    f.check_camera()
+    assert paused == [80]  # caiu na pausa manual com o desvio original
+
+
+def test_camera_falha_e_cai_na_pausa_quando_bussola_nunca_aparece(monkeypatch):
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    drags = []
+    monkeypatch.setattr(cycle.screen, "right_drag", lambda dx: drags.append(dx))
+    f = FakeFisher([None] * 20)
+    f.compass = FakeCompass([None] * 20)  # nunca acha, nem variando
+    paused = []
+    monkeypatch.setattr(f, "_pause_for_camera", lambda tol, drift, img: paused.append((tol, drift)))
+    f.check_camera()
+    assert paused == [(6, None)]
+    assert len(drags) == cycle.AUTO_CAMERA_SWEEP_STEPS  # varreu a volta inteira e desistiu
+
+
+def test_camera_auto_corrigida_espera_botao_direito_soltar(monkeypatch):
+    compass = FakeCompassAuto(drift0=50, real_gain=0.5)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.screen, "right_drag", lambda dx: compass.apply_drag(dx))
+    waited = []
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: waited.append(True))
+    f = FakeFisher([None] * 20)
+    f.compass = compass
+    f.check_camera()
+    assert waited == [True]  # convergiu sozinho: ainda espera o botão direito soltar
+
+
+def test_auto_camera_desligado_nunca_arrasta(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    drags = []
+    monkeypatch.setattr(cycle.screen, "right_drag", lambda dx: drags.append(dx))
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: None)
+    f = FakeFisher([None, None])
+    f.compass = FakeCompass([50, 0])
+    f.cfg["auto_camera"] = False
+    f.cfg["timings"]["recovery_wait_sec"] = 999
+    f.check_camera()
+    assert drags == []  # desligado na config: nunca tenta girar sozinho
+
+
+def test_recover_solta_botao_direito(monkeypatch):
+    monkeypatch.setattr(cycle.screen, "release_key", lambda k: None)
+    monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: False)
+    released = []
+    monkeypatch.setattr(cycle.screen, "release_right_button", lambda: released.append(True))
+    f = FakeFisher([])
+    f.notifier = FakeNotifier()
+    f.cfg["timings"]["recovery_wait_sec"] = 0
+    f._recover("teste", None)
+    assert released == [True]  # nunca deixa o botão direito preso, mesmo fora da câmera

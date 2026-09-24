@@ -23,6 +23,7 @@ DEFAULTS: dict = {
     "scan_area": {"x": 0.731640625, "y": 0.2923611111111111, "w": 0.03828125, "h": 0.3763888888888889},
     "compass_lock": True,
     "compass_tolerance_px": 6,
+    "auto_camera": True,  # tenta girar a câmera sozinha antes de pausar esperando a pessoa
     "ground_pickup": True,
     "discord": {
         "webhook_url": "",
@@ -46,6 +47,9 @@ DEFAULTS: dict = {
         "rod_equip_wait_sec": 0.8,
         "recovery_wait_sec": 30.0,
         "refocus_after_sec": 15.0,
+        # numa pausa longa (câmera, ponto fora da tela, recuperação) com o Roblox na frente,
+        # mexe o mouse 1px a cada tanto para o jogo não desconectar por 20 min sem input. 0 desliga.
+        "anti_idle_sec": 240.0,
     },
     "limits": {
         "rod_retries": 3,
