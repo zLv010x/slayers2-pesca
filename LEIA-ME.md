@@ -62,7 +62,12 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
   - Nome lido torto pelo OCR ("Clov.tn Fish", "Jzebra Fish", "Golden FEh") vira o item certo. Ao abrir,
     a macro arruma o catálogo local: leituras erradas antigas entram no item certo e lixo sai.
   - Para mandar os itens novos para o compartilhado: `python src/catalog.py publicar`.
-  - Se um nome entrar errado, corrija o `"name"` no `itens.json` e ponha a leitura errada em `"aliases"`.
+  - Cada item do `catalogo/itens.json` é uma **ficha**: `"name"` (nome certo), `"image"` (imagem em
+    `catalogo/imagens/`) e `"rarity"` (common, rare, epic, legendary ou mythic). O aviso no Discord e na
+    janela usa a ficha: nome, imagem e raridade vêm dela, não da cor lida na tela. A cor só vale para item
+    que ainda não tem ficha.
+  - Para corrigir um item, edite a ficha: troque o `"rarity"`, troque a imagem ou ponha a leitura errada
+    em `"aliases"`. O `publicar` não mexe na raridade que já está na ficha.
 
 ## Atalhos
 

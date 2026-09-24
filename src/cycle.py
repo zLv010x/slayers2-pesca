@@ -617,13 +617,21 @@ class Fisher:
             log.warning("Nenhum aviso de item depois do T (drop perdido ou aviso não lido).")
             _, shot = self.frame()
             logbook.save_evidence(shot, "sem aviso de item")
-        snap = loot_mod.item_snapshot(img, fresh[-1]) if fresh else None
+        snap = None
+        if fresh:  # a janela mostra a imagem da ficha do catálogo; o print da hora só se não tiver
+            snap = self._card_image(fresh[-1].name)
+            if snap is None:
+                snap = loot_mod.item_snapshot(img, fresh[-1])
         self.cb.loot(fresh, snap)
         self.sleep(self.t("after_collect_sec"))
         return fresh
 
+    def _card_image(self, name: str) -> np.ndarray | None:
+        return self.catalog.card_image(name) if self.catalog is not None else None
+
     def _report(self, item: loot_mod.Loot, img: np.ndarray) -> loot_mod.Loot:
-        """Passa o item pelo catálogo (nome/raridade certos), registra e avisa. Devolve o item corrigido."""
+        """Passa o item pelo catálogo (nome/raridade/imagem da ficha), registra e avisa.
+        Devolve o item corrigido."""
         snap = loot_mod.item_snapshot(img, item)
         first_in_catalog = False
         if self.catalog is not None:
@@ -636,6 +644,9 @@ class Fisher:
             if rec.rarity != item.rarity:
                 log.info("Raridade pelo catálogo: %s (cor lida: %s)", rec.rarity, item.rarity)
             item = replace(item, name=rec.name, rarity=rec.rarity)
+            card = self.catalog.card_image(rec.name)
+            if card is not None:
+                snap = card  # imagem da ficha do catálogo; o print da hora só se não tiver
         log.info("Pegou: %s x%d [%s]%s", item.name, item.quantity, item.rarity,
                  " NEW!" if item.is_new else "")
         self.session.record(item.name, item.quantity, item.rarity)

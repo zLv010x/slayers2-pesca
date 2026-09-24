@@ -1028,3 +1028,39 @@ def test_reinicio_sozinho_nunca_seta_o_spawn(spawn_env):
     f.spawn_auto_allowed = False
     f._set_spawn_if_needed()
     assert calls == []
+
+
+def test_discord_recebe_nome_raridade_e_imagem_da_ficha_do_catalogo(tmp_path, monkeypatch):
+    """Pedido de 24/09: o aviso usa a ficha do catálogo (nome certo, imagem, raridade)."""
+    import json
+
+    import cv2
+    import numpy as np
+
+    from catalog import Catalog
+    from loot import Loot
+    from session import Session
+    shared = tmp_path / "catalogo"
+    (shared / "imagens").mkdir(parents=True)
+    cv2.imwrite(str(shared / "imagens" / "lost-cape.png"), np.full((30, 90, 3), 77, np.uint8))
+    item = {"name": "Lost Cape", "slug": "lost-cape", "image": "imagens/lost-cape.png", "rarity": "mythic",
+            "rarity_votes": {}, "aliases": []}
+    (shared / "itens.json").write_text(json.dumps({"items": [item]}), encoding="utf-8")
+    sent, shown = [], []
+    f = FakeFisher([True])
+    f.catalog = Catalog(shared, tmp_path / "catalogo_local")
+    f.session = Session(log_dir=tmp_path)
+    f.notifier = type("N", (), {"send_loot": lambda self, r: sent.append(r)})()
+    f.cb.loot = lambda items, snap: shown.append(snap)
+    f.cfg["timings"]["after_minigame_sec"] = 0
+    f.cfg["timings"]["after_collect_sec"] = 0
+    live = np.full((20, 60, 3), 200, np.uint8)
+    monkeypatch.setattr(cycle.loot_mod, "read_popups", lambda img, **kw: [])
+    monkeypatch.setattr(cycle.loot_mod, "item_snapshot", lambda img, it: live)
+    f._hold_t = lambda before, budget, where: ([Loot("LO$t Cape", 1, "common", (0, 0, 1, 1))], None)
+    got = f.collect()
+    assert [(i.name, i.rarity) for i in got] == [("Lost Cape", "mythic")]
+    report = sent[0]
+    assert (report.name, report.rarity) == ("Lost Cape", "mythic")
+    assert report.image.shape == (30, 90, 3) and int(report.image[0, 0, 0]) == 77  # imagem da ficha
+    assert shown[0].shape == (30, 90, 3)  # a janela da macro mostra a mesma imagem

@@ -306,3 +306,66 @@ def test_chute_por_semelhanca_nao_vira_apelido_gravado(dirs):
 def test_collector_nao_e_o_botao_collect():
     import catalog
     assert catalog.plausible_name("Collector") and catalog.plausible_name("Collected")
+
+
+# ---------------------------------------------------------------- a ficha do catálogo manda (24/09)
+def _shared_card(shared, name, rarity, with_image=True):
+    shared.mkdir(parents=True, exist_ok=True)
+    (shared / "imagens").mkdir(exist_ok=True)
+    slug = name.lower().replace(" ", "-")
+    image = None
+    if with_image:
+        card = np.full((30, 90, 3), 77, np.uint8)
+        import cv2
+        cv2.imwrite(str(shared / "imagens" / f"{slug}.png"), card)
+        image = f"imagens/{slug}.png"
+    item = {"name": name, "slug": slug, "image": image, "rarity": rarity, "rarity_votes": {}, "aliases": []}
+    (shared / "itens.json").write_text(json.dumps({"items": [item]}), encoding="utf-8")
+
+
+def test_raridade_da_ficha_do_catalogo_manda(dirs):
+    """Pedido de 24/09: a raridade vem da ficha do item, não da cor lida na tela."""
+    shared, local = dirs
+    _shared_card(shared, "Lost Cape", "mythic")
+    cat = Catalog(shared, local)
+    for _ in range(10):
+        rec = cat.record("Lost Cape", "common", IMG)
+    assert rec.rarity == "mythic"
+    assert cat.record("LO$t Cape", "rare", IMG).rarity == "mythic"
+
+
+def test_ficha_com_raridade_invalida_usa_as_leituras(dirs):
+    shared, local = dirs
+    _shared_card(shared, "Coral", "roxo")
+    cat = Catalog(shared, local)
+    cat.record("Coral", "common", IMG)
+    assert cat.record("Coral", "common", IMG).rarity == "common"
+
+
+def test_publicar_nao_troca_a_raridade_que_esta_na_ficha(dirs):
+    """Quem corrigir a raridade à mão no itens.json não pode perder a correção no publicar."""
+    shared, local = dirs
+    _shared_card(shared, "Lost Mask", "mythic")
+    cat = Catalog(shared, local)
+    for _ in range(5):
+        cat.record("Lost Mask", "common", IMG)
+    cat.publish()
+    assert _index(shared)[0]["rarity"] == "mythic"
+
+
+def test_imagem_da_ficha_vai_para_o_aviso(dirs):
+    shared, local = dirs
+    _shared_card(shared, "Lost Cape", "mythic")
+    cat = Catalog(shared, local)
+    card = cat.card_image("LO$t Cape")
+    assert card is not None and card.shape == (30, 90, 3) and int(card[0, 0, 0]) == 77
+    assert cat.card_image("Item Desconhecido") is None
+
+
+def test_sem_imagem_no_compartilhado_usa_a_do_local(dirs):
+    shared, local = dirs
+    _shared_card(shared, "Coral", "common", with_image=False)
+    cat = Catalog(shared, local)
+    cat.record("Coral", "common", np.full((20, 60, 3), 5, np.uint8))
+    card = cat.card_image("Coral")
+    assert card is not None and int(card[0, 0, 0]) == 5

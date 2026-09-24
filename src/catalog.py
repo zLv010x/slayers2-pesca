@@ -8,7 +8,9 @@ Cada item tem uma imagem só (a da primeira vez) e uma entrada no itens.json.
 A macro usa o catálogo para:
 - saber se o item já é conhecido (se não for, é "primeiro no catálogo");
 - corrigir erros do OCR comparando com os nomes conhecidos ("Golden Fisn" -> "Golden Fish");
-- usar a raridade mais vista daquele item em vez de confiar só na cor da vez.
+- dar a FICHA do item para o aviso (Discord e janela): nome certo, imagem e raridade.
+  A raridade escrita no compartilhado manda (dá para corrigir à mão no itens.json); item que
+  ainda não está lá usa a raridade mais vista nas leituras da cor.
 
 `python src/catalog.py publicar` junta o catalogo_local no compartilhado.
 """
@@ -53,6 +55,7 @@ TIDY_RARE_SHARE = 0.10
 TIDY_BACKUP_NAME = "itens.antes-de-arrumar.json"
 EXACT_HOWS = ("exact", "fixed", "alias", "affix")   # jeitos de achar que não são chute
 SHARED_FIELDS = ("name", "slug", "image", "rarity", "rarity_votes", "aliases")
+RARITIES = ("common", "rare", "epic", "legendary", "mythic")
 # Nome de item tem pelo menos 3 letras ("Ore"): "6d" (prazo dos códigos no menu principal)
 # e textos da própria tela ("Collect", "item", a etiqueta "NEW!") não são itens.
 MIN_NAME_LETTERS = 3
@@ -226,7 +229,7 @@ class Catalog:
             in_shared_with_image = bool(self.shared.get(key, {}).get("image"))
             if not in_shared_with_image and not local.get("image") and snapshot is not None:
                 local["image"] = self._save_image(self.local_dir, local["slug"], snapshot)
-            best = self._votes(key).most_common(1)[0][0]
+            best = self._fixed_rarity(key) or self._votes(key).most_common(1)[0][0]
             local["rarity"] = best
             try:
                 _save_index(self.local_dir / INDEX_NAME, self.local)
@@ -236,6 +239,25 @@ class Catalog:
                 logbook.get().warning("Não consegui salvar o catálogo local: %s", exc)
             corrected = how not in (None, "exact") or normalize(name) != key
             return Recorded(canonical_name, best, first_time, corrected)
+
+    def _fixed_rarity(self, key: str) -> str | None:
+        """Raridade escrita na ficha do compartilhado (None = não tem ou está errada)."""
+        rarity = self.shared.get(key, {}).get("rarity")
+        return rarity if rarity in RARITIES else None
+
+    def card_image(self, name: str) -> np.ndarray | None:
+        """Imagem da ficha do item (a do compartilhado; senão a do local). None = sem imagem."""
+        with self._lock:
+            key, _ = self._find(name)
+            if key is None:
+                return None
+            places = ((self.shared_dir, self.shared.get(key, {})), (self.local_dir, self.local.get(key, {})))
+        for folder, entry in places:
+            if entry.get("image"):
+                img = cv2.imread(str(folder / entry["image"]))
+                if img is not None:
+                    return img
+        return None
 
     def _is_known_alias(self, key: str, name: str) -> bool:
         return name in self.shared.get(key, {}).get("aliases", [])
@@ -376,7 +398,8 @@ class Catalog:
                     added.append(local["name"])
                 votes = Counter(shared.get("rarity_votes", {})) + Counter(local.get("rarity_votes", {}))
                 shared["rarity_votes"] = dict(votes)
-                shared["rarity"] = votes.most_common(1)[0][0] if votes else shared.get("rarity")
+                if shared.get("rarity") not in RARITIES:  # a ficha já tem raridade: não troca
+                    shared["rarity"] = votes.most_common(1)[0][0] if votes else None
                 shared["aliases"] = sorted(set(shared.get("aliases", [])) | set(local.get("aliases", [])))
                 if not shared.get("image") and local.get("image"):
                     src = self.local_dir / local["image"]
