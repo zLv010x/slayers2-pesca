@@ -18,6 +18,8 @@ user32 = ctypes.windll.user32
 INPUT_MOUSE = 0
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_VIRTUALDESK = 0x4000
@@ -38,6 +40,13 @@ TYPE_DELAY_SEC = 0.04
 WAIT_FREE_SETTLE_SEC = 0.3
 WAIT_FREE_TIMEOUT_SEC = 5.0
 WAIT_FREE_POLL_SEC = 0.05
+# Anti-inatividade: mexida mínima, só para o jogo ver "atividade" (o Roblox derruba
+# quem fica 20 min sem mandar nada).
+ANTI_IDLE_NUDGE_PX = 1
+# Arrasto da câmera (botão direito) em pedaços pequenos: o jogo lê como um gesto contínuo.
+RIGHT_DRAG_STEP_PX = 40
+RIGHT_DRAG_STEP_SEC = 0.01
+RIGHT_DRAG_SETTLE_SEC = 0.05
 
 user32.MonitorFromPoint.restype = ctypes.c_void_p
 user32.MonitorFromPoint.argtypes = (wintypes.POINT, wintypes.DWORD)
@@ -211,6 +220,39 @@ class MouseButton:
         # Manda o "soltar" mesmo que ache que já está solto: garante que não trava.
         _mouse(MOUSEEVENTF_LEFTUP)
         self.held = False
+
+
+def anti_idle_nudge() -> None:
+    """Mexe o mouse 1px e volta (relativo, sem apertar botão nenhum): não gira a câmera,
+    só faz o Roblox ver "atividade" numa pausa longa para não desconectar por inatividade."""
+    _mouse(MOUSEEVENTF_MOVE, ANTI_IDLE_NUDGE_PX, 0)
+    _mouse(MOUSEEVENTF_MOVE, -ANTI_IDLE_NUDGE_PX, 0)
+
+
+def release_right_button() -> None:
+    """Manda o "soltar" do botão direito mesmo achando que já está solto: garante que a
+    câmera nunca fica presa girando."""
+    _mouse(MOUSEEVENTF_RIGHTUP)
+
+
+def right_drag(dx: int) -> None:
+    """Gira a câmera: segura o botão direito, arrasta `dx` px na horizontal (movimento
+    relativo, em pedaços pequenos) e solta. Tolerante a exceção: solta o botão sempre,
+    mesmo se algo der errado no meio do arrasto.
+    """
+    try:
+        _mouse(MOUSEEVENTF_RIGHTDOWN)
+        time.sleep(RIGHT_DRAG_SETTLE_SEC)
+        remaining = int(dx)
+        step = RIGHT_DRAG_STEP_PX if remaining >= 0 else -RIGHT_DRAG_STEP_PX
+        while remaining != 0:
+            move = step if abs(remaining) >= abs(step) else remaining
+            _mouse(MOUSEEVENTF_MOVE, move, 0)
+            remaining -= move
+            time.sleep(RIGHT_DRAG_STEP_SEC)
+        time.sleep(RIGHT_DRAG_SETTLE_SEC)
+    finally:
+        _mouse(MOUSEEVENTF_RIGHTUP)
 
 
 def send_combo(combo: str) -> None:

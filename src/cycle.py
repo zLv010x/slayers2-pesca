@@ -62,6 +62,20 @@ STATS_EVERY_CYCLES = 10
 BAIT_RETRY_CYCLES = 20
 # Bússola sumida: confere se o jogo voltou para o menu principal a cada tanto (OCR ~50 ms).
 MENU_CHECK_SEC = 5.0
+# Granularidade da checagem de anti-inatividade dentro de uma espera longa (_recover).
+ANTI_IDLE_POLL_SEC = 5.0
+# Câmera automática: chute inicial de px de arrasto por px de desvio da bússola (o sinal e o
+# valor certo são aprendidos com a resposta medida; ajustado em self._camera_gain).
+AUTO_CAMERA_DEFAULT_GAIN = 3.0
+AUTO_CAMERA_MIN_GAIN = 0.2
+AUTO_CAMERA_MAX_GAIN = 50.0
+# Trava de segurança: nunca arrasta mais que isso de uma vez, mesmo com um ganho maluco.
+AUTO_CAMERA_MAX_DRAG_PX = 1500
+# Tentativas de ajuste fino (desvio conhecido) antes de desistir e cair na pausa manual.
+AUTO_CAMERA_MAX_TRIES = 8
+# Bússola não achada: varre girando em passos de ~1/12 de volta, cobrindo a volta inteira.
+AUTO_CAMERA_SWEEP_STEPS = 12
+AUTO_CAMERA_SWEEP_STEP_PX = 400
 
 log = logbook.get()
 
@@ -115,6 +129,7 @@ class Fisher:
         self.detector = Detector()
         self.tracker = TrackController()
         self.mouse = screen.MouseButton()
+        self._camera_gain = AUTO_CAMERA_DEFAULT_GAIN
         self.grabber: screen.Grabber | None = None
         self.hwnd: int | None = None
         self._stop = threading.Event()
@@ -219,10 +234,27 @@ class Fisher:
         if not self.cfg.get("compass_lock", True) or not self.compass.ready:
             return
         tol = int(self.cfg.get("compass_tolerance_px", 6))
-        paused_at, notified, menu_checked = None, False, None
+        _, img = self.frame()
+        drift = self.compass.drift_px(img)
+        if drift is not None and abs(drift) <= tol:
+            return
+        if self.cfg.get("auto_camera", True) and self._auto_fix_camera(tol, drift):
+            log.info("Câmera ajustada sozinha (ganho aprendido %.3f px/px).", self._camera_gain)
+            screen.wait_mouse_free(sleep=self.sleep)
+            return
+        self._pause_for_camera(tol, drift, img)
+
+    def _pause_for_camera(self, tol: int, drift: int | None, img: np.ndarray | None) -> None:
+        """Pausa esperando a pessoa arrumar a câmera (a correção sozinha não deu conta).
+
+        `drift`/`img` são a medição que o chamador já fez (evita gastar um quadro à toa).
+        """
+        paused_at, notified, menu_checked, last_nudge, first = None, False, None, 0.0, True
         while True:
-            _, img = self.frame()
-            drift = self.compass.drift_px(img)
+            if not first:
+                _, img = self.frame()
+                drift = self.compass.drift_px(img)
+            first = False
             now = time.perf_counter()
             if drift is None and (menu_checked is None or now - menu_checked >= MENU_CHECK_SEC):
                 menu_checked = now
@@ -235,13 +267,91 @@ class Fisher:
                 return
             msg = "bússola não encontrada" if drift is None else f"câmera girou {drift:+d}px"
             if paused_at is None:
-                paused_at = time.perf_counter()
+                paused_at, last_nudge = now, now
                 logbook.save_evidence(img, "camera " + msg)
-            elif not notified and time.perf_counter() - paused_at >= self.t("recovery_wait_sec"):
+            elif not notified and now - paused_at >= self.t("recovery_wait_sec"):
                 self._notify(f"⏸️ Pesca pausada: {msg}. Arrume a câmera no jogo para continuar.")
                 notified = True
             self.cb.status(f"Pausado: {msg}. Volte a câmera para a posição marcada (ou remarque o ponto).")
             self.sleep(1.0)
+            last_nudge = self._anti_idle_tick(last_nudge, time.perf_counter())
+
+    def _drag_for_drift(self, drift: int) -> int:
+        """Px de arrasto para tentar corrigir `drift` px de bússola, com o ganho aprendido."""
+        dx = round(drift * self._camera_gain)
+        return max(-AUTO_CAMERA_MAX_DRAG_PX, min(AUTO_CAMERA_MAX_DRAG_PX, dx))
+
+    def _learn_gain(self, drift_before: int, dx: int, drift_after: int) -> None:
+        """Ajusta o ganho (px de arrasto por px de bússola) pela resposta medida, sinal incluído:
+        se o sentido do arrasto estiver invertido, o ganho aprendido também inverte sozinho."""
+        moved = drift_before - drift_after  # quanto a bússola realmente voltou com esse arrasto
+        if dx == 0 or moved == 0:
+            return
+        gain = dx / moved
+        gain = max(-AUTO_CAMERA_MAX_GAIN, min(AUTO_CAMERA_MAX_GAIN, gain))
+        if abs(gain) < AUTO_CAMERA_MIN_GAIN:
+            gain = AUTO_CAMERA_MIN_GAIN if gain >= 0 else -AUTO_CAMERA_MIN_GAIN
+        self._camera_gain = gain
+
+    def _sweep_for_compass(self) -> int | None:
+        """Bússola não achada (câmera girada demais): varre girando em passos fixos até o
+        modelo aparecer de novo. Devolve o desvio já medido, ou None se não achou."""
+        for _ in range(AUTO_CAMERA_SWEEP_STEPS):
+            self._check_stop()
+            screen.right_drag(AUTO_CAMERA_SWEEP_STEP_PX)
+            _, img = self.frame()
+            drift = self.compass.drift_px(img)
+            if drift is not None:
+                return drift
+        return None
+
+    def _auto_fix_camera(self, tol: int, drift: int | None) -> bool:
+        """Tenta girar a câmera sozinha antes de pausar. True = ficou dentro da tolerância.
+
+        `drift` é a medição que o chamador já fez (evita gastar um quadro à toa).
+        """
+        if drift is None:
+            drift = self._sweep_for_compass()
+            if drift is None:
+                return False
+        for _ in range(AUTO_CAMERA_MAX_TRIES):
+            if abs(drift) <= tol:
+                return True
+            self._check_stop()
+            dx = self._drag_for_drift(drift)
+            if dx == 0:
+                return False
+            screen.right_drag(dx)
+            _, img = self.frame()
+            new_drift = self.compass.drift_px(img)
+            if new_drift is None:
+                return False  # girou demais e perdeu a bússola de novo: desiste
+            self._learn_gain(drift, dx, new_drift)
+            drift = new_drift
+        return abs(drift) <= tol
+
+    def _anti_idle_tick(self, last_nudge: float, now: float) -> float:
+        """Numa pausa longa, mexe o mouse 1px a cada `anti_idle_sec` (só com o Roblox na
+        frente) para o jogo não desconectar por ficar parado. 0 desliga. Devolve quando foi
+        a última mexida (para a próxima chamada)."""
+        interval = float(self.cfg["timings"].get("anti_idle_sec", 0))
+        if interval <= 0 or now - last_nudge < interval:
+            return last_nudge
+        if self.hwnd and window.is_foreground(self.hwnd):
+            log.debug("Anti-inatividade: mexendo o mouse (pausa longa com o Roblox na frente).")
+            screen.anti_idle_nudge()
+        return now
+
+    def _wait_with_anti_idle(self, seconds: float) -> None:
+        """Como self.sleep, mas em pedaços: mantém o anti-inatividade rodando em esperas longas."""
+        end = time.perf_counter() + max(0.0, seconds)
+        last_nudge = time.perf_counter()
+        while True:
+            remaining = end - time.perf_counter()
+            if remaining <= 0:
+                return
+            self.sleep(min(ANTI_IDLE_POLL_SEC, remaining))
+            last_nudge = self._anti_idle_tick(last_nudge, time.perf_counter())
 
     def cast(self) -> None:
         pt = self.cfg["cast_point"]
@@ -271,6 +381,7 @@ class Fisher:
         monitor: pausa até a janela voltar, sem contar como recuperação."""
         msg = "a janela do Roblox está saindo da tela; o ponto de lançamento ficou fora do monitor"
         paused_at, notified = time.perf_counter(), False
+        last_nudge = paused_at
         logbook.save_evidence(self._safe_shot(), "lançamento fora do monitor")
         while True:
             self.cb.status(f"Pausado: {msg}.")
@@ -278,6 +389,7 @@ class Fisher:
                 self._notify(f"⏸️ Pesca pausada: {msg}. Mova a janela do Roblox de volta para a tela.")
                 notified = True
             self.sleep(OFF_MONITOR_POLL_SEC)
+            last_nudge = self._anti_idle_tick(last_nudge, time.perf_counter())
             r = self.rect()
             x, y = self.to_screen(r, self.cfg["cast_point"]["x"], self.cfg["cast_point"]["y"])
             if screen.on_monitor(x, y):
@@ -634,6 +746,7 @@ class Fisher:
         """Registra o problema, avisa, espera e deixa o laço tentar de novo."""
         self.mouse.release()
         screen.release_key("t")
+        screen.release_right_button()
         self._stop_if_main_menu(img if img is not None else self._safe_shot())
         self.recoveries += 1
         limit = int(self.cfg["limits"]["max_recoveries"])
@@ -647,7 +760,7 @@ class Fisher:
         self._notify(f"⚠️ {msg}. Tentando de novo em {wait:.0f}s ({self.recoveries}/{limit}).",
                      ping=self.recoveries == 1)
         self.cb.status(f"Recuperando ({self.recoveries}/{limit}): {msg}. Nova tentativa em {wait:.0f}s.")
-        self.sleep(wait)
+        self._wait_with_anti_idle(wait)
 
     def _stop_if_main_menu(self, img: np.ndarray | None) -> None:
         """No menu principal não há personagem: tentar de novo não adianta, então para de vez e avisa."""
@@ -710,4 +823,5 @@ class Fisher:
             self._log_stats()
             self.mouse.release()
             screen.release_key("t")
+            screen.release_right_button()
             self.grabber.close()

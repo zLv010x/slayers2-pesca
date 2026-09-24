@@ -153,3 +153,62 @@ def test_wait_mouse_free_false_quando_o_cursor_nunca_para(monkeypatch, clock):
     monkeypatch.setattr(screen, "cursor_pos", moving_pos)
     monkeypatch.setattr(screen, "buttons_held", lambda: False)
     assert screen.wait_mouse_free(timeout=0.5, sleep=clock.sleep) is False
+
+
+# ---------------------------------------------------------------- anti_idle_nudge
+
+def test_anti_idle_nudge_manda_so_movimento_relativo_sem_botao(monkeypatch):
+    calls = []
+    monkeypatch.setattr(screen, "_mouse", lambda flags, dx=0, dy=0: calls.append((flags, dx, dy)))
+    screen.anti_idle_nudge()
+    # só MOUSEEVENTF_MOVE (sem ABSOLUTE nem botão nenhum): não pode girar a câmera
+    assert all(flags == screen.MOUSEEVENTF_MOVE for flags, _, _ in calls)
+    # vai 1px e volta: efeito líquido zero
+    assert sum(dx for _, dx, _ in calls) == 0
+    assert calls  # mandou pelo menos alguma coisa
+
+
+# ---------------------------------------------------------------- botão direito / right_drag
+
+def test_release_right_button_manda_rightup_mesmo_se_ja_solto(monkeypatch):
+    calls = []
+    monkeypatch.setattr(screen, "_mouse", lambda flags, dx=0, dy=0: calls.append(flags))
+    screen.release_right_button()
+    assert calls == [screen.MOUSEEVENTF_RIGHTUP]
+
+
+def test_right_drag_segura_arrasta_em_pedacos_e_solta(monkeypatch):
+    calls = []
+    monkeypatch.setattr(screen, "_mouse", lambda flags, dx=0, dy=0: calls.append((flags, dx)))
+    monkeypatch.setattr(screen, "time", type("T", (), {"sleep": staticmethod(lambda s: None)}))
+    screen.right_drag(100)
+    assert calls[0][0] == screen.MOUSEEVENTF_RIGHTDOWN
+    assert calls[-1][0] == screen.MOUSEEVENTF_RIGHTUP
+    moves = [dx for flags, dx in calls if flags == screen.MOUSEEVENTF_MOVE]
+    assert moves and sum(moves) == 100
+    assert all(abs(m) <= screen.RIGHT_DRAG_STEP_PX for m in moves)  # em pedaços, não de uma vez
+
+
+def test_right_drag_arrasto_negativo_tambem_funciona(monkeypatch):
+    calls = []
+    monkeypatch.setattr(screen, "_mouse", lambda flags, dx=0, dy=0: calls.append((flags, dx)))
+    monkeypatch.setattr(screen, "time", type("T", (), {"sleep": staticmethod(lambda s: None)}))
+    screen.right_drag(-90)
+    moves = [dx for flags, dx in calls if flags == screen.MOUSEEVENTF_MOVE]
+    assert sum(moves) == -90
+
+
+def test_right_drag_solta_o_botao_mesmo_se_o_movimento_falhar(monkeypatch):
+    calls = []
+
+    def fake_mouse(flags, dx=0, dy=0):
+        calls.append(flags)
+        if flags == screen.MOUSEEVENTF_MOVE:
+            raise RuntimeError("falha simulada no meio do arrasto")
+
+    monkeypatch.setattr(screen, "_mouse", fake_mouse)
+    monkeypatch.setattr(screen, "time", type("T", (), {"sleep": staticmethod(lambda s: None)}))
+    with pytest.raises(RuntimeError):
+        screen.right_drag(50)
+    assert calls[0] == screen.MOUSEEVENTF_RIGHTDOWN
+    assert calls[-1] == screen.MOUSEEVENTF_RIGHTUP  # nunca fica preso, mesmo com exceção
