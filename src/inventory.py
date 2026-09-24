@@ -25,6 +25,10 @@ TILE_MIN_SIDE_FRAC = 0.02          # lado mínimo do quadrado em fração da lar
 GRID_MAX_X = 0.74                  # a grade termina antes do painel de detalhes
 GRID_MAX_TILES = 12
 ACTIVE_TAB_MIN = 120               # medido: aba selecionada ~180, as outras ~25
+SEARCH_TEXT_REACH = 1.8            # o texto digitado pode passar do tamanho do "Item name here!"
+SEARCH_ICON_RX = re.compile(r"^[QqOo0]\s+")
+PLACEHOLDER_RX = re.compile(r"item\s*name", re.IGNORECASE)
+CARET_CHARS = "1li"
 
 
 @dataclass(frozen=True)
@@ -121,6 +125,27 @@ def has_bait_badge(tile: np.ndarray) -> bool:
         if any("bait" in line.text.lower() for line in ocr.read_lines(cv2.cvtColor(big, cv2.COLOR_GRAY2BGR))):
             return True
     return False
+
+
+def normalize_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def read_search_text(frame: np.ndarray, search: ocr.Line) -> str:
+    """O que está escrito na caixa de busca ("" = vazia, mostrando "Item name here!")."""
+    fh, fw = frame.shape[:2]
+    y0, y1 = max(0, search.y - search.h), min(fh, search.y + 2 * search.h)
+    x0, x1 = max(0, search.x - search.h), min(fw, search.x + int(search.w * SEARCH_TEXT_REACH))
+    lines = [line.text.strip() for line in ocr.read_lines(frame[y0:y1, x0:x1])]
+    text = " ".join(t for t in lines if len(t) > 1)   # pedaço de 1 letra = lupa ("Q") solta
+    text = SEARCH_ICON_RX.sub("", text)                # a lupa grudada no texto
+    return "" if PLACEHOLDER_RX.search(text) else text
+
+
+def search_matches(got: str, want: str) -> bool:
+    """A caixa mostra `want`? Aceita o cursor piscando no fim, que o OCR lê como "1"/"l"/"|"."""
+    g, w = normalize_text(got), normalize_text(want)
+    return g == w or (len(g) == len(w) + 1 and g.startswith(w) and g[-1] in CARET_CHARS)
 
 
 def find_tiles(frame: np.ndarray, search: ocr.Line) -> list[Box]:

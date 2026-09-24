@@ -41,6 +41,10 @@ WAIT_MENU = 1.0
 WAIT_CLICK = 0.6
 WAIT_SEARCH = 1.0
 CLEAR_KEYS = 30
+BACKSPACE_HOLD_SEC = 0.03       # rápido demais o jogo perde teclas
+BACKSPACE_GAP_SEC = 0.02
+WAIT_TYPED = 0.4
+TYPE_TRIES = 3
 TAB_TRIES = 3
 CLOSE_TRIES = 3
 
@@ -113,7 +117,10 @@ class BaitMenu:
     def close(self) -> None:
         """Limpa a busca e fecha o menu, conferindo que fechou mesmo."""
         if self.search_box is not None:
-            self._type_search("")
+            try:
+                self._type_search("")
+            except MenuError:
+                pass  # busca suja não pode impedir de fechar o menu
         for attempt in range(CLOSE_TRIES):
             rect, img, lines = self._read()
             if not self._menu_open(lines, img):
@@ -130,17 +137,37 @@ class BaitMenu:
             raise MenuError("o menu não fechou")
         self.search_box = None
 
-    def _type_search(self, text: str) -> None:
-        """Clica na busca, apaga, digita e aperta Enter (o jogo só filtra com Enter)."""
-        rect, _ = self.f.frame()
-        box = self.search_box
-        self._click_xy(rect.x + box.x + box.w // 2, rect.y + box.y + box.h // 2, "busca")
+    def _clear_focused_box(self) -> None:
+        """Apaga tudo da caixa: cursor no fim + selecionar tudo + backspaces sem pressa."""
+        screen.tap_key("end")
+        screen.send_combo("ctrl+a")
         for _ in range(CLEAR_KEYS):
-            screen.tap_key("backspace", hold_sec=0.01)
-        if text:
-            screen.type_text(text)
-        screen.tap_key("enter")  # também tira o foco da caixa de busca
-        self.f.sleep(WAIT_SEARCH)
+            screen.tap_key("backspace", hold_sec=BACKSPACE_HOLD_SEC)
+            self.f.sleep(BACKSPACE_GAP_SEC)
+
+    def _type_search(self, text: str) -> None:
+        """Deixa a busca com exatamente `text` e aperta Enter (o jogo só filtra com Enter).
+
+        Confere lendo a caixa: se sobrou texto velho ou o jogo perdeu letras, apaga e
+        digita de novo. Enter também tira o foco da caixa (senão as teclas viram texto).
+        """
+        got = ""
+        for _ in range(TYPE_TRIES):
+            rect, _ = self.f.frame()
+            box = self.search_box
+            self._click_xy(rect.x + box.x + box.w // 2, rect.y + box.y + box.h // 2, "busca")
+            self._clear_focused_box()
+            if text:
+                screen.type_text(text)
+            self.f.sleep(WAIT_TYPED)
+            _, img = self.f.frame()
+            got = inventory.read_search_text(img, box)
+            if inventory.search_matches(got, text):
+                screen.tap_key("enter")
+                self.f.sleep(WAIT_SEARCH)
+                return
+        screen.tap_key("enter")
+        raise MenuError(f"não consegui escrever {text!r} na busca (ficou {got!r})")
 
     def _search_one(self, name: str):
         """Busca o nome e devolve (rect, img, quadrado ou None). Erro se a busca não filtrou."""

@@ -132,6 +132,12 @@ class MouseButton:
         self.held = False
 
 
+def send_combo(combo: str) -> None:
+    """Atalho tipo "ctrl+a"."""
+    keyboard.send(combo)
+    time.sleep(NUDGE_SEC)
+
+
 def tap_key(key: str, hold_sec: float = 0.08) -> None:
     keyboard.release(key)
     keyboard.press(key)

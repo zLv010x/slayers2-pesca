@@ -92,17 +92,62 @@ def test_menu_aberto_e_reconhecido_mesmo_com_texto_na_busca(shot):
     assert not BaitMenu(None)._menu_open(ocr.read_lines(jogo), jogo)
 
 
-def test_digita_na_busca_e_aperta_enter(monkeypatch):
+def _fake_menu(monkeypatch, box_reads):
+    """Menu com teclado/mouse de mentira; box_reads = o que o jogo mostra na caixa a cada leitura."""
     import bait_menu
     from window import Rect
     keys = []
     monkeypatch.setattr(bait_menu.screen, "click_at", lambda x, y: keys.append(("click", x, y)) or True)
     monkeypatch.setattr(bait_menu.screen, "tap_key", lambda k, hold_sec=0.08: keys.append(k))
+    monkeypatch.setattr(bait_menu.screen, "send_combo", lambda c: keys.append(c))
     monkeypatch.setattr(bait_menu.screen, "type_text", lambda t: keys.append(("texto", t)))
+    reads = list(box_reads)
+    monkeypatch.setattr(bait_menu.inventory, "read_search_text", lambda img, box: reads.pop(0))
     fisher = type("F", (), {"frame": lambda self: (Rect(0, 0, 100, 100), None), "sleep": lambda self, s: None})()
     menu = bait_menu.BaitMenu(fisher)
     menu.search_box = ocr.Line("Item name here!", 10, 10, 50, 10)
+    return menu, keys
+
+
+def test_digita_na_busca_e_aperta_enter(monkeypatch):
+    menu, keys = _fake_menu(monkeypatch, ["Fish Head"])
     menu._type_search("Fish Head")
     assert keys[0][0] == "click"
+    assert "ctrl+a" in keys and "end" in keys          # limpa tudo antes de digitar
     assert ("texto", "Fish Head") in keys
-    assert keys[-1] == "enter"       # o jogo só filtra depois do Enter
+    assert keys[-1] == "enter"                          # o jogo só filtra depois do Enter
+
+
+def test_sobrou_texto_velho_apaga_e_digita_de_novo(monkeypatch):
+    # 1ª vez o jogo deixou letras antigas; 2ª vez ficou certo
+    menu, keys = _fake_menu(monkeypatch, ["WormFish Head", "Fish Head"])
+    menu._type_search("Fish Head")
+    assert keys.count(("texto", "Fish Head")) == 2
+    assert keys.count("enter") == 1 and keys[-1] == "enter"
+
+
+def test_desiste_se_nunca_escrever_certo(monkeypatch):
+    import bait_menu
+    menu, keys = _fake_menu(monkeypatch, ["xx"] * 5)
+    with pytest.raises(bait_menu.MenuError):
+        menu._type_search("Fish Head")
+    assert keys[-1] == "enter"   # mesmo desistindo, solta a caixa (senão as teclas viram texto)
+
+
+@pytest.mark.parametrize("name, box, expected", [
+    ("menu_inventario_fishing.webp", ("Q Item name here!", 745, 73, 174, 18), ""),
+    ("menu_busca_sem_enter.webp", ("Q Fish Head", 953, 71, 150, 23), "Fish Head"),
+    ("menu_aberto_333.webp", ("Q 333", 953, 71, 75, 23), "333"),
+])
+def test_le_o_texto_da_caixa_de_busca(shot, name, box, expected):
+    from inventory import read_search_text, search_matches
+    got = read_search_text(shot(name), ocr.Line(*box))
+    assert got == "" if expected == "" else search_matches(got, expected)
+
+
+def test_cursor_piscando_nao_atrapalha_a_conferencia():
+    from inventory import search_matches
+    assert search_matches("3331", "333")          # cursor lido como "1"
+    assert search_matches("Fish Head", "fish head")
+    assert not search_matches("WormFish Head", "Fish Head")
+    assert not search_matches("Fish", "Fish Head")
