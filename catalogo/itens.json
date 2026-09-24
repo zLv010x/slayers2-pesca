@@ -10,23 +10,28 @@
       },
       "aliases": [
         "Clovu'll Fish",
+        "Clovvn Fish",
         "loi:'d.l Fish"
       ]
     },
     {
       "name": "Coral",
       "slug": "coral",
-      "image": null,
+      "image": "imagens/coral.png",
       "rarity": "common",
       "rarity_votes": {
         "common": 5
       },
-      "aliases": []
+      "aliases": [
+        "ecoral",
+        "scoral",
+        "é-4Coral"
+      ]
     },
     {
       "name": "Crustadon",
       "slug": "crustadon",
-      "image": null,
+      "image": "imagens/crustadon.png",
       "rarity": "legendary",
       "rarity_votes": {
         "legendary": 5
@@ -46,6 +51,20 @@
       "aliases": []
     },
     {
+      "name": "Krathulon",
+      "slug": "krathulon",
+      "image": "imagens/krathulon.png",
+      "rarity": "legendary",
+      "rarity_votes": {
+        "legendary": 5
+      },
+      "aliases": [
+        "Krath LI lon",
+        "Krath u Ion",
+        "KrathLlIon"
+      ]
+    },
+    {
       "name": "Lost Cape",
       "slug": "lost-cape",
       "image": "imagens/lost-cape.png",
@@ -58,6 +77,50 @@
         "LOSt Cape",
         "Lost Ca pe",
         "ostCa e"
+      ]
+    },
+    {
+      "name": "Lost Lantern",
+      "slug": "lost-lantern",
+      "image": "imagens/lost-lantern.png",
+      "rarity": "mythic",
+      "rarity_votes": {
+        "mythic": 5
+      },
+      "aliases": []
+    },
+    {
+      "name": "Lost Mask",
+      "slug": "lost-mask",
+      "image": "imagens/lost-mask.png",
+      "rarity": "mythic",
+      "rarity_votes": {
+        "mythic": 5
+      },
+      "aliases": [
+        "kost Mask"
+      ]
+    },
+    {
+      "name": "Lost Outfit",
+      "slug": "lost-outfit",
+      "image": "imagens/lost-outfit.png",
+      "rarity": "mythic",
+      "rarity_votes": {
+        "mythic": 5
+      },
+      "aliases": []
+    },
+    {
+      "name": "Metal Scraps",
+      "slug": "metal-scraps",
+      "image": "imagens/metal-scraps.png",
+      "rarity": "common",
+      "rarity_votes": {
+        "common": 5
+      },
+      "aliases": [
+        "8 N Metal Scraps"
       ]
     },
     {
@@ -76,12 +139,14 @@
     {
       "name": "OuwFish",
       "slug": "ouwfish",
-      "image": null,
+      "image": "imagens/ouwfish.png",
       "rarity": "common",
       "rarity_votes": {
         "common": 5
       },
-      "aliases": []
+      "aliases": [
+        "GNOuwFish"
+      ]
     },
     {
       "name": "OuwFwesh",
@@ -94,6 +159,26 @@
       "aliases": [
         "Fwesh"
       ]
+    },
+    {
+      "name": "Refinement Ore",
+      "slug": "refinement-ore",
+      "image": "imagens/refinement-ore.png",
+      "rarity": "rare",
+      "rarity_votes": {
+        "rare": 5
+      },
+      "aliases": []
+    },
+    {
+      "name": "Sea Horse",
+      "slug": "sea-horse",
+      "image": "imagens/sea-horse.png",
+      "rarity": "common",
+      "rarity_votes": {
+        "common": 5
+      },
+      "aliases": []
     },
     {
       "name": "Silk Thread",
@@ -127,11 +212,22 @@
       },
       "aliases": [
         "'Zebra Fish",
+        "9zebra Fish",
+        "Azebra Fish",
+        "Febra Fish",
         "H Zebra Fish",
+        "Hzebra Fish",
         "J b % ayzebra Fish",
         "Jzebra Fish",
         "U Zebra Fish",
-        "u) uzebra Fish"
+        "eyzebra Fish",
+        "fzebra Fish",
+        "quebra Fish",
+        "s9zebra Fish",
+        "s?zebra Fish",
+        "u) uzebra Fish",
+        "uajzebra Fish",
+        "yzebra Fish"
       ]
     }
   ]
