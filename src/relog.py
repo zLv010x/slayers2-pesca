@@ -1,0 +1,340 @@
+"""Reconecta sozinho quando o servidor cai: Disconnected -> Reconnect -> menu
+principal -> PLAY -> seleção de servidor -> JOIN -> de volta ao jogo.
+
+O texto e o código do dialog "Disconnected" mudam (inatividade, internet, servidor
+desligado...), então a detecção é genérica: só olha o título "Disconnected" e o
+botão "Reconnect". Alguns códigos (ex.: 264, conta entrou de outro aparelho) não
+podem reconectar sozinhos — derrubariam quem está jogando de verdade — e um dialog
+sem botão Reconnect também não: nesses casos só avisamos.
+
+`classify()` lê a tela e diz que tela é (com as posições úteis em pixels do frame).
+`Relogger` é a máquina de estados: a cada passo ela olha a tela de novo (nunca
+assume ordem fixa) e decide o que fazer, com timeout por etapa e no total.
+
+Interface de `actions` que o integrador precisa ligar (nenhuma delas existe hoje
+em screen.py — são as únicas coisas novas que este módulo precisa receber):
+    grab() -> (origem_x, origem_y, frame)      # print da área do jogo
+    click(x, y)                                 # clique simples (screen.click_at)
+    mouse_down(x, y)                            # move até lá e segura o botão
+    mouse_up()                                   # solta o botão (mesmo se já solto)
+    type_text(text)                             # screen.type_text
+    press(key)                                   # ex.: "enter" (screen.tap_key)
+    sleep(sec)                                   # espera interrompível
+    now() -> float                               # relógio (time.monotonic)
+    in_game(frame) -> bool                       # confirma que voltou pro jogo (hotbar etc.)
+    status(msg)                                  # loga/mostra o que está acontecendo
+`mouse_down`/`mouse_up` existem à parte de `click` porque segurar o JOIN precisa
+soltar cedo se a tela mudar (ou se der exceção) — um `hold(x, y, sec)` bloqueado
+não permite isso.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+
+import menu
+import ocr
+
+DEFAULTS: dict = {
+    "enabled": False,
+    "has_spawn_gamepass": False,  # reservado p/ funcionalidade futura (não usado aqui)
+    "spawn_set": False,            # idem
+    "server_mode": "vip",          # "vip" (servidor próprio) | "nick" (entra no de outro)
+    "owner_nick": "",
+    "map_name": "Ouwland",
+    "hold_join_sec": 2.0,
+    "step_timeout_sec": 90,
+    "total_timeout_sec": 600,
+    "no_reconnect_codes": [264],
+}
+
+# --- calibração das posições/textos, ver tests/fixtures/relog_*.webp ---------
+ERROR_CODE_RE = re.compile(r"error\s*code\D{0,4}(\d+)", re.IGNORECASE)
+JOIN_PRIVATE_WORDS = {"join", "private"}  # texto do botão do modo nick, ainda sem print p/ confirmar
+LOADING_WORD = "entering"
+# card do servidor fica abaixo-direita do nome do mapa (fração do tamanho do frame)
+CARD_OFFSET_X_FRAC = 0.075
+CARD_OFFSET_Y_FRAC = 0.230
+# "Private server owner" o OCR lê embaralhado (fonte clara/itálica): a posição vem
+# por deslocamento a partir do botão JOIN, que o OCR lê bem.
+OWNER_FIELD_DY_FRAC = 0.052
+# clicar "fora" do campo de nick antes de segurar o JOIN no modo VIP (ver docstring de Relogger)
+OUTSIDE_CLICK_DY_FRAC = 0.10
+# margem ao redor do dialog Disconnected pra separar a mensagem de texto de fundo
+DIALOG_PAD_X_FRAC = 0.09
+DIALOG_PAD_Y_FRAC = 0.05
+
+POLL_SEC = 0.5       # intervalo entre olhadas na tela
+HOLD_POLL_SEC = 0.1  # intervalo de checagem durante o JOIN segurado
+
+
+@dataclass(frozen=True)
+class Screen:
+    """O que `classify()` enxergou: tipo da tela + posições úteis (pixels do frame)."""
+    kind: str  # "disconnected" | "main_menu" | "server_select" | "server_card" | "loading" | "unknown"
+    message: str | None = None
+    error_code: int | None = None
+    reconnect_pos: tuple[int, int] | None = None
+    leave_pos: tuple[int, int] | None = None
+    play_pos: tuple[int, int] | None = None
+    card_pos: tuple[int, int] | None = None
+    owner_field_pos: tuple[int, int] | None = None
+    join_pos: tuple[int, int] | None = None
+    join_private_pos: tuple[int, int] | None = None
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z]+", text.lower()))
+
+
+def _squash(text: str) -> str:
+    """Texto em minúsculas sem espaços: o OCR às vezes divide "Reconnect" em duas."""
+    return re.sub(r"\s+", "", text.lower())
+
+
+def _center(line: ocr.Line) -> tuple[int, int]:
+    return (line.x + line.w // 2, line.y + line.h // 2)
+
+
+def classify(frame: np.ndarray | None, cfg: dict | None = None) -> Screen:
+    """Descobre em qual tela de reconexão o jogo está agora ("unknown" se for outra)."""
+    if frame is None or frame.size == 0:
+        return Screen(kind="unknown")
+    cfg = cfg or {}
+    lines = ocr.read_lines(frame)
+    return (
+        _detect_disconnected(frame, lines)
+        or _detect_main_menu(frame)
+        or _detect_loading(lines)
+        or _detect_server(frame, lines, cfg.get("map_name", DEFAULTS["map_name"]))
+        or Screen(kind="unknown")
+    )
+
+
+def _bbox(frame: np.ndarray, lines: list[ocr.Line]) -> tuple[float, float, float, float]:
+    fh, fw = frame.shape[:2]
+    x0 = min(l.x for l in lines) - DIALOG_PAD_X_FRAC * fw
+    y0 = min(l.y for l in lines) - DIALOG_PAD_Y_FRAC * fh
+    x1 = max(l.x + l.w for l in lines) + DIALOG_PAD_X_FRAC * fw
+    y1 = max(l.y + l.h for l in lines) + DIALOG_PAD_Y_FRAC * fh
+    return x0, y0, x1, y1
+
+
+def _inside(line: ocr.Line, box: tuple[float, float, float, float]) -> bool:
+    x0, y0, x1, y1 = box
+    cx, cy = _center(line)
+    return x0 <= cx <= x1 and y0 <= cy <= y1
+
+
+def _detect_disconnected(frame: np.ndarray, lines: list[ocr.Line]) -> Screen | None:
+    title = next((l for l in lines if _words(l.text) == {"disconnected"}), None)
+    reconnect = next((l for l in lines if _squash(l.text) == "reconnect"), None)
+    if title is None and reconnect is None:
+        return None
+    leave = next((l for l in lines if _squash(l.text) == "leave"), None)
+    anchors = [l for l in (title, reconnect, leave) if l is not None]
+    box = _bbox(frame, anchors)
+    error_code, message_parts = None, []
+    for line in lines:
+        if line in anchors or not _inside(line, box):
+            continue
+        match = ERROR_CODE_RE.search(line.text)
+        if match:
+            error_code = int(match.group(1))
+        else:
+            message_parts.append(line.text)
+    return Screen(
+        kind="disconnected",
+        message=" ".join(message_parts) or None,
+        error_code=error_code,
+        reconnect_pos=_center(reconnect) if reconnect else None,
+        leave_pos=_center(leave) if leave else None,
+    )
+
+
+def _detect_main_menu(frame: np.ndarray) -> Screen | None:
+    """Mesma região/heurística de menu.is_main_menu, só que também acha o PLAY."""
+    fh, fw = frame.shape[:2]
+    region = frame[int(menu.REGION_Y[0] * fh):int(menu.REGION_Y[1] * fh),
+                    int(menu.REGION_X[0] * fw):int(menu.REGION_X[1] * fw)]
+    if region.size == 0:
+        return None
+    ox, oy = int(menu.REGION_X[0] * fw), int(menu.REGION_Y[0] * fh)
+    found: dict[str, ocr.Line] = {}
+    for line in ocr.read_lines(region, min_height=menu.OCR_UPSCALE * region.shape[0]):
+        for word in _words(line.text):
+            found.setdefault(word, line)
+    if len(set(found) & menu.MENU_WORDS) < menu.MIN_WORDS:
+        return None
+    play = found.get("play")
+    play_pos = (ox + play.x + play.w // 2, oy + play.y + play.h // 2) if play else None
+    return Screen(kind="main_menu", play_pos=play_pos)
+
+
+def _detect_loading(lines: list[ocr.Line]) -> Screen | None:
+    if any(LOADING_WORD in _words(l.text) for l in lines):
+        return Screen(kind="loading")
+    return None
+
+
+def _detect_server(frame: np.ndarray, lines: list[ocr.Line], map_name: str) -> Screen | None:
+    fh, fw = frame.shape[:2]
+    join = next((l for l in lines if _words(l.text) == {"join"}), None)
+    if join:
+        jx, jy = _center(join)
+        owner_pos = (jx, int(jy - OWNER_FIELD_DY_FRAC * fh))
+        return Screen(kind="server_card", join_pos=(jx, jy), owner_field_pos=owner_pos,
+                      join_private_pos=_find_join_private(lines))
+    title = next((l for l in lines if map_name.lower() in _words(l.text)), None)
+    if title:
+        card_pos = (title.x + int(CARD_OFFSET_X_FRAC * fw), title.y + int(CARD_OFFSET_Y_FRAC * fh))
+        return Screen(kind="server_select", card_pos=card_pos)
+    return None
+
+
+def _find_join_private(lines: list[ocr.Line]) -> tuple[int, int] | None:
+    """Botão do modo nick (texto ainda não confirmado): "join"+"private" numa linha
+    curta, sem "hold" (isso já é a legenda "Hold to join private server", sempre visível)."""
+    for line in lines:
+        words = _words(line.text)
+        if JOIN_PRIVATE_WORDS <= words and "hold" not in words and len(words) <= 3:
+            return _center(line)
+    return None
+
+
+@dataclass(frozen=True)
+class RelogResult:
+    ok: bool
+    reason: str
+    error_code: int | None = None
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+@dataclass
+class Relogger:
+    """Máquina de estados do relog. Ver docstring do módulo p/ interface de `actions`."""
+    cfg: dict
+    actions: Any
+    _typed_nick: bool = field(default=False, init=False, repr=False)
+
+    def run(self) -> RelogResult:
+        cfg = self.cfg
+        if not cfg.get("enabled", False):
+            return RelogResult(False, "desabilitado")
+        if cfg.get("server_mode") not in ("vip", "nick"):
+            return RelogResult(False, "modo_servidor_invalido")
+        self._typed_nick = False
+        a = self.actions
+        total_deadline = a.now() + cfg.get("total_timeout_sec", DEFAULTS["total_timeout_sec"])
+        step_timeout = cfg.get("step_timeout_sec", DEFAULTS["step_timeout_sec"])
+        last_kind, step_deadline = None, a.now() + step_timeout
+        while True:
+            now = a.now()
+            if now >= total_deadline:
+                a.status("Reconexão automática: tempo total esgotado.")
+                return RelogResult(False, "timeout_total")
+            _, _, frame = a.grab()
+            screen = classify(frame, cfg)
+            if screen.kind != last_kind:
+                last_kind, step_deadline, self._typed_nick = screen.kind, now + step_timeout, False
+            elif now >= step_deadline:
+                a.status(f"Reconexão automática: travou em '{screen.kind}'.")
+                return RelogResult(False, "timeout_etapa")
+            result = self._step(screen, frame)
+            if result is not None:
+                return result
+            a.sleep(POLL_SEC)
+
+    def _step(self, screen: Screen, frame: np.ndarray) -> RelogResult | None:
+        handlers = {
+            "disconnected": self._on_disconnected,
+            "main_menu": self._on_main_menu,
+            "server_select": self._on_server_select,
+            "server_card": self._on_server_card,
+            "loading": self._on_loading,
+        }
+        return handlers.get(screen.kind, self._on_unknown)(screen, frame)
+
+    def _on_disconnected(self, screen: Screen, frame: np.ndarray) -> RelogResult | None:
+        no_reconnect = self.cfg.get("no_reconnect_codes", DEFAULTS["no_reconnect_codes"])
+        if screen.error_code in no_reconnect:
+            self.actions.status(f"Desconectado (código {screen.error_code}): não reconecto sozinho.")
+            return RelogResult(False, "codigo_sem_reconexao", screen.error_code)
+        if screen.reconnect_pos is None:
+            self.actions.status("Desconectado sem botão Reconnect: avisando.")
+            return RelogResult(False, "sem_botao_reconnect", screen.error_code)
+        self.actions.status("Desconectado: clicando em Reconnect.")
+        self.actions.click(*screen.reconnect_pos)
+        return None
+
+    def _on_main_menu(self, screen: Screen, frame: np.ndarray) -> None:
+        if screen.play_pos:
+            self.actions.status("Menu principal: clicando em PLAY.")
+            self.actions.click(*screen.play_pos)
+
+    def _on_server_select(self, screen: Screen, frame: np.ndarray) -> None:
+        if screen.card_pos:
+            map_name = self.cfg.get("map_name", DEFAULTS["map_name"])
+            self.actions.status(f"Selecionando o servidor {map_name}.")
+            self.actions.click(*screen.card_pos)
+
+    def _on_server_card(self, screen: Screen, frame: np.ndarray) -> None:
+        if self.cfg.get("server_mode") == "vip":
+            self._join_vip(screen, frame)
+        else:
+            self._join_nick(screen)
+
+    def _on_loading(self, screen: Screen, frame: np.ndarray) -> None:
+        self.actions.status("Carregando...")
+
+    def _on_unknown(self, screen: Screen, frame: np.ndarray) -> RelogResult | None:
+        if self.actions.in_game(frame):
+            self.actions.status("De volta ao jogo.")
+            return RelogResult(True, "ok")
+        return None
+
+    def _join_vip(self, screen: Screen, frame: np.ndarray) -> None:
+        """Clica no campo de nick, clica fora dele (perde o foco) e segura o JOIN."""
+        if not screen.owner_field_pos or not screen.join_pos:
+            return
+        a = self.actions
+        a.status("Servidor VIP: preparando o campo e segurando o JOIN.")
+        a.click(*screen.owner_field_pos)
+        ox, oy = screen.owner_field_pos
+        a.click(ox, int(oy - OUTSIDE_CLICK_DY_FRAC * frame.shape[0]))
+        self._hold_join(*screen.join_pos)
+
+    def _join_nick(self, screen: Screen) -> None:
+        a = self.actions
+        if not self._typed_nick:
+            if not screen.owner_field_pos:
+                return
+            nick = self.cfg.get("owner_nick", "")
+            a.status(f"Servidor por nick: digitando '{nick}'.")
+            a.click(*screen.owner_field_pos)
+            a.type_text(nick)
+            a.press("enter")
+            self._typed_nick = True
+        elif screen.join_private_pos:
+            a.status("Clicando em Join Private.")
+            a.click(*screen.join_private_pos)
+
+    def _hold_join(self, x: int, y: int) -> None:
+        """Segura o JOIN olhando a tela: solta cedo se ela mudar, e sempre solta no final
+        (mesmo se algo der exceção no meio do caminho)."""
+        a = self.actions
+        a.mouse_down(x, y)
+        try:
+            deadline = a.now() + self.cfg.get("hold_join_sec", DEFAULTS["hold_join_sec"])
+            while a.now() < deadline:
+                a.sleep(HOLD_POLL_SEC)
+                _, _, frame = a.grab()
+                if classify(frame, self.cfg).kind != "server_card":
+                    break
+        finally:
+            a.mouse_up()

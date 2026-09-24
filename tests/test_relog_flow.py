@@ -1,0 +1,275 @@
+"""Máquina de estados do Relogger com telas falsas (sem OCR/imagem de verdade):
+fluxo VIP e por nick, código sem reconexão, dialog sem botão, timeouts e o
+solta-sempre do JOIN segurado."""
+import pytest
+
+import relog
+from relog import DEFAULTS, Relogger, Screen
+
+RECONNECT_POS = (1073, 621)
+PLAY_POS = (90, 598)
+CARD_POS = (390, 430)
+OWNER_POS = (960, 877)
+JOIN_POS = (960, 930)
+JOIN_PRIVATE_POS = (960, 900)
+
+# Telas falsas: a chave é o "frame" que FakeGame devolve (só o nome do estado).
+SCREENS = {
+    "disconnected": Screen(kind="disconnected", reconnect_pos=RECONNECT_POS,
+                            leave_pos=(929, 621), error_code=278),
+    "disconnected_264": Screen(kind="disconnected", reconnect_pos=RECONNECT_POS, error_code=264),
+    "disconnected_sem_reconnect": Screen(kind="disconnected", reconnect_pos=None, leave_pos=(900, 621)),
+    "main_menu": Screen(kind="main_menu", play_pos=PLAY_POS),
+    "server_select": Screen(kind="server_select", card_pos=CARD_POS),
+    "server_card": Screen(kind="server_card", join_pos=JOIN_POS, owner_field_pos=OWNER_POS),
+    "server_card_com_join_private": Screen(kind="server_card", join_pos=JOIN_POS, owner_field_pos=OWNER_POS,
+                                            join_private_pos=JOIN_PRIVATE_POS),
+    "loading": Screen(kind="loading"),
+}
+
+
+def _fake_classify(frame, cfg=None):
+    return SCREENS.get(frame, Screen(kind="unknown"))
+
+
+class FakeFrame(str):
+    """String (nome do estado) que também parece um frame de verdade (`.shape`),
+    já que _join_vip usa a altura do frame para calcular o ponto de "clicar fora"."""
+    shape = (1004, 1918, 3)
+
+
+@pytest.fixture(autouse=True)
+def _sem_ocr_de_verdade(monkeypatch):
+    """Todos os testes deste arquivo usam telas falsas, nunca OCR de verdade."""
+    monkeypatch.setattr(relog, "classify", _fake_classify)
+
+
+class FakeClock:
+    def __init__(self):
+        self.t = 0.0
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, sec: float) -> None:
+        self.t += sec
+
+
+class FakeGame:
+    """Simula o jogo reagindo às ações da macro (clique muda de tela etc.)."""
+
+    def __init__(self, start: str, server_mode: str):
+        self.kind = start
+        self.server_mode = server_mode
+        self.clicks: list[tuple[int, int]] = []
+        self.typed: list[str] = []
+        self.pressed: list[str] = []
+        self.mouse_events: list[tuple] = []
+        self.status_msgs: list[str] = []
+        self.in_game_calls = 0
+        self.clock = FakeClock()
+
+    # --- interface `actions` esperada pelo Relogger ---------------------------
+    def grab(self):
+        return 0, 0, FakeFrame(self.kind)
+
+    def click(self, x: int, y: int) -> None:
+        self.clicks.append((x, y))
+        self._on_click(x, y)
+
+    def _on_click(self, x: int, y: int) -> None:
+        pos = (x, y)
+        if self.kind == "disconnected" and pos == RECONNECT_POS:
+            self.kind = "main_menu"
+        elif self.kind == "main_menu" and pos == PLAY_POS:
+            self.kind = "server_select"
+        elif self.kind == "server_select" and pos == CARD_POS:
+            self.kind = "server_card"
+        elif self.kind.startswith("server_card") and pos == JOIN_PRIVATE_POS:
+            self.kind = "ingame"
+        # clicar no campo de nick/VIP ou "fora dele" não muda a tela por si só
+
+    def mouse_down(self, x: int, y: int) -> None:
+        self.mouse_events.append(("down", x, y, self.clock.now()))
+
+    def mouse_up(self) -> None:
+        self.mouse_events.append(("up", self.clock.now()))
+        if self.kind.startswith("server_card") and self.server_mode == "vip":
+            self.kind = "ingame"
+
+    def type_text(self, text: str) -> None:
+        self.typed.append(text)
+
+    def press(self, key: str) -> None:
+        self.pressed.append(key)
+        if key == "enter" and self.kind == "server_card" and self.server_mode == "nick":
+            self.kind = "server_card_com_join_private"
+
+    def sleep(self, sec: float) -> None:
+        self.clock.sleep(sec)
+
+    def now(self) -> float:
+        return self.clock.now()
+
+    def in_game(self, frame) -> bool:
+        self.in_game_calls += 1
+        return frame == "ingame"
+
+    def status(self, msg: str) -> None:
+        self.status_msgs.append(msg)
+
+
+class StuckGame(FakeGame):
+    """A tela nunca reage a clique: serve para testar os timeouts."""
+
+    def _on_click(self, x: int, y: int) -> None:
+        pass
+
+
+def _cfg(**over):
+    return {**DEFAULTS, "enabled": True, **over}
+
+
+def test_fluxo_vip_a_partir_do_disconnected():
+    game = FakeGame(start="disconnected", server_mode="vip")
+    cfg = _cfg(server_mode="vip", hold_join_sec=2.0)
+    result = Relogger(cfg, game).run()
+    assert result.ok and result.reason == "ok"
+    outside_pos = (OWNER_POS[0], int(OWNER_POS[1] - relog.OUTSIDE_CLICK_DY_FRAC * FakeFrame.shape[0]))
+    assert game.clicks == [RECONNECT_POS, PLAY_POS, CARD_POS, OWNER_POS, outside_pos]
+    downs = [e for e in game.mouse_events if e[0] == "down"]
+    ups = [e for e in game.mouse_events if e[0] == "up"]
+    assert len(downs) == 1 and len(ups) == 1
+    assert ups[0][1] - downs[0][3] >= cfg["hold_join_sec"]
+    assert game.in_game_calls >= 1
+
+
+def test_fluxo_nick_a_partir_do_menu_pula_o_reconnect():
+    # já está no menu principal: não faz sentido nem existe um Reconnect pra clicar.
+    game = FakeGame(start="main_menu", server_mode="nick")
+    cfg = _cfg(server_mode="nick", owner_nick="Fulano123")
+    result = Relogger(cfg, game).run()
+    assert result.ok and result.reason == "ok"
+    assert RECONNECT_POS not in game.clicks
+    assert game.clicks[:3] == [PLAY_POS, CARD_POS, OWNER_POS]
+    assert game.typed == ["Fulano123"]
+    assert game.pressed == ["enter"]
+    assert JOIN_PRIVATE_POS in game.clicks
+    assert not any(e[0] == "down" for e in game.mouse_events)  # nick não segura JOIN
+
+
+def test_codigo_sem_reconexao_nao_clica_em_nada():
+    game = FakeGame(start="disconnected_264", server_mode="vip")
+    result = Relogger(_cfg(), game).run()
+    assert not result.ok
+    assert result.reason == "codigo_sem_reconexao"
+    assert result.error_code == 264
+    assert game.clicks == []
+
+
+def test_dialog_sem_botao_reconnect_nao_reconecta():
+    game = FakeGame(start="disconnected_sem_reconnect", server_mode="vip")
+    result = Relogger(_cfg(), game).run()
+    assert not result.ok
+    assert result.reason == "sem_botao_reconnect"
+    assert game.clicks == []
+
+
+def test_desabilitado_nao_faz_nada():
+    game = FakeGame(start="disconnected", server_mode="vip")
+    result = Relogger(_cfg(enabled=False), game).run()
+    assert not result.ok and result.reason == "desabilitado"
+    assert game.clicks == []
+
+
+def test_modo_de_servidor_invalido_falha_sem_tentar():
+    game = FakeGame(start="main_menu", server_mode="vip")
+    result = Relogger(_cfg(server_mode="turbo"), game).run()
+    assert not result.ok and result.reason == "modo_servidor_invalido"
+    assert game.clicks == []
+
+
+def test_timeout_de_etapa_vira_falha_com_motivo():
+    game = StuckGame(start="server_select", server_mode="vip")
+    cfg = _cfg(step_timeout_sec=1, total_timeout_sec=600)
+    result = Relogger(cfg, game).run()
+    assert not result.ok
+    assert result.reason == "timeout_etapa"
+    assert len(game.clicks) >= 1
+
+
+def test_timeout_total_vira_falha_com_motivo():
+    game = StuckGame(start="server_select", server_mode="vip")
+    cfg = _cfg(step_timeout_sec=600, total_timeout_sec=relog.POLL_SEC)
+    result = Relogger(cfg, game).run()
+    assert not result.ok
+    assert result.reason == "timeout_total"
+
+
+def test_tela_carregando_so_avisa_e_continua_olhando():
+    game = FakeGame(start="loading", server_mode="vip")
+    relogger = Relogger(_cfg(), game)
+    result = relogger._step(Screen(kind="loading"), FakeFrame("loading"))
+    assert result is None
+    assert any("arregando" in m for m in game.status_msgs)
+
+
+def test_hold_solta_mesmo_com_excecao():
+    class FakeHoldActions:
+        def __init__(self):
+            self.t = 0.0
+            self.mouse: list[str] = []
+            self.grabs = 0
+
+        def now(self):
+            return self.t
+
+        def sleep(self, sec):
+            self.t += sec
+
+        def mouse_down(self, x, y):
+            self.mouse.append("down")
+
+        def mouse_up(self):
+            self.mouse.append("up")
+
+        def grab(self):
+            self.grabs += 1
+            raise RuntimeError("falha simulada durante o hold")
+
+    actions = FakeHoldActions()
+    relogger = Relogger(_cfg(hold_join_sec=5.0), actions)
+    with pytest.raises(RuntimeError):
+        relogger._hold_join(960, 930)
+    assert actions.mouse == ["down", "up"]
+
+
+def test_hold_solta_cedo_se_a_tela_mudar_antes_da_hora():
+    class ChangingActions:
+        def __init__(self):
+            self.t = 0.0
+            self.mouse: list[str] = []
+            self.grabs = 0
+
+        def now(self):
+            return self.t
+
+        def sleep(self, sec):
+            self.t += sec
+
+        def mouse_down(self, x, y):
+            self.mouse.append("down")
+
+        def mouse_up(self):
+            self.mouse.append("up")
+
+        def grab(self):
+            self.grabs += 1
+            # muda de tela já na primeira olhada: não devia esperar o hold_join_sec inteiro
+            return 0, 0, "loading"
+
+    actions = ChangingActions()
+    relogger = Relogger(_cfg(hold_join_sec=5.0), actions)
+    relogger._hold_join(960, 930)
+    assert actions.mouse == ["down", "up"]
+    assert actions.t < 5.0
