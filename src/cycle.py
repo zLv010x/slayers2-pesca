@@ -180,7 +180,7 @@ class Fisher:
         for attempt in range(retries + 1):
             _, img = self.frame()
             check = hotbar.check_rod(img)
-            log.debug("Vara: equipada=%s (disco %.0f, fundo %.0f)",
+            log.debug("Vara: equipada=%s (slot 3 %.0f, vizinhos %.0f)",
                       check.equipped, check.inner_gray, check.outer_gray)
             if check.equipped:
                 return
