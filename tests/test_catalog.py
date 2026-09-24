@@ -379,3 +379,16 @@ def test_catalogo_do_repositorio_reconhece_o_ore_lido_torto():
     cat = Catalog(repo, repo.with_name("sem_local_no_teste"))
     assert cat.resolve("v?Ore") == "Ore" and cat.resolve("ROre") == "Ore"
     assert cat.resolve("Refinement Ore") == "Refinement Ore"
+
+
+def test_preco_vem_da_ficha(dirs):
+    shared, local = dirs
+    shared.mkdir(parents=True)
+    items = [{"name": "Zebra Fish", "slug": "zebra-fish", "image": None, "rarity": "rare", "rarity_votes": {},
+              "aliases": [], "price": 66},
+             {"name": "Coral", "slug": "coral", "image": None, "rarity": "common", "rarity_votes": {},
+              "aliases": [], "price": "muito"},
+             {"name": "Ore", "slug": "ore", "image": None, "rarity": "mythic", "rarity_votes": {},
+              "aliases": [], "price": -5}]
+    (shared / "itens.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    assert Catalog(shared, local).prices() == {"Zebra Fish": 66}  # preço inválido é ignorado

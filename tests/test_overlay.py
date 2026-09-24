@@ -100,3 +100,32 @@ def test_lines_baits_without_catch():
 def test_lines_overflow_row():
     counts = Counter({f"Fish {i}": 1 for i in range(5)})
     assert "+2 outros" in flat(overlay.build_lines("0m 01s", counts, Counter(), max_rows=3))
+
+
+# ---------------------------------------------------------------- valor dos peixes (24/09)
+PRICES = {"Zebra Fish": 66, "Clown Fish": 40}
+
+
+def test_cada_peixe_mostra_o_valor_se_vender_todos():
+    lines = overlay.build_lines("1m 00s", Counter({"Zebra Fish": 295, "Clown Fish": 3}), Counter(),
+                                max_rows=8, prices=PRICES)
+    rows = {ln.text: ln for ln in lines if ln.style == "row"}
+    assert rows["Zebra Fish"].value == 295 * 66 and rows["Clown Fish"].value == 120
+
+
+def test_total_de_todos_os_peixes_embaixo_da_lista():
+    counts = Counter({"Zebra Fish": 2, "Clown Fish": 1, "Golden Fish": 5, "Ore": 3})
+    lines = overlay.build_lines("1m 00s", counts, Counter(), max_rows=1, prices=PRICES)
+    total = [ln for ln in lines if ln.style == "total"]
+    assert len(total) == 1 and total[0].value == 2 * 66 + 40  # conta até os que ficaram em "+N outros"
+    styles = [ln.style for ln in lines]
+    assert styles.index("total") < styles.index("head", styles.index("total"))  # antes da seção Itens
+
+
+def test_peixe_sem_preco_fica_sem_valor_e_sem_total():
+    lines = overlay.build_lines("1m 00s", Counter({"Golden Fish": 5}), Counter(), max_rows=8, prices=PRICES)
+    assert all(ln.value is None for ln in lines) and "total" not in [ln.style for ln in lines]
+
+
+def test_formata_valor_com_ponto_de_milhar():
+    assert overlay.money(19470) == "19.470" and overlay.money(66) == "66"

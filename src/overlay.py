@@ -23,7 +23,8 @@ POS_DECIMALS = 4
 PARTY_MARGIN = 0.005      # afasta um pouco da borda esquerda
 MAX_ROWS = 8              # linhas por seção; o resto vira "+N outros"
 ALPHA = 0.88
-BG, FG, HEAD, MUTED, QTY = "#111827", "#e5e7eb", "#93c5fd", "#9ca3af", "#fbbf24"
+BG, FG, HEAD, MUTED, QTY, MONEY = "#111827", "#e5e7eb", "#93c5fd", "#9ca3af", "#fbbf24", "#34d399"
+CURRENCY = "Ginzo"        # moeda do jogo (o preço de venda aparece no inventário)
 FONT = ("Segoe UI", 10)
 FONT_BOLD = ("Segoe UI Semibold", 10)
 FONT_TITLE = ("Segoe UI Semibold", 12)
@@ -36,8 +37,13 @@ FISH_NAMES = {"krathulon", "crustadon", "seahorse", "ouwfwesh"}
 
 class Line(NamedTuple):
     text: str
-    style: str               # title | head | row | more | empty
+    style: str               # title | head | row | more | total | empty
     qty: int | None = None
+    value: int | None = None  # quanto vale vender (quantidade x preço da ficha)
+
+
+def money(value: int) -> str:
+    return f"{value:,}".replace(",", ".")
 
 
 def _normalize(name: str) -> str:
@@ -65,24 +71,30 @@ def trim(rows: list, limit: int) -> tuple[list, int]:
     return rows[:limit], max(0, len(rows) - limit)
 
 
-def _section(title: str, rows: list[tuple[str, int]], max_rows: int) -> list[Line]:
+def _section(title: str, rows: list[tuple[str, int]], max_rows: int,
+             prices: dict[str, int] | None = None, total_label: str | None = None) -> list[Line]:
     if not rows:
         return []
+    prices = prices or {}
+    value = {name: qty * prices[name] for name, qty in rows if name in prices}
     shown, rest = trim(rows, max_rows)
     out = [Line(f"{title} ({sum(q for _, q in rows)})", "head")]
-    out += [Line(name, "row", qty) for name, qty in shown]
+    out += [Line(name, "row", qty, value.get(name)) for name, qty in shown]
     if rest:
         out.append(Line(f"+{rest} outros", "more"))
+    if total_label and value:  # soma de todos, até os que ficaram em "+N outros"
+        out.append(Line(total_label, "total", None, sum(value.values())))
     return out
 
 
-def build_lines(elapsed: str, counts: Counter, baits_used: Counter, max_rows: int = MAX_ROWS) -> list[Line]:
+def build_lines(elapsed: str, counts: Counter, baits_used: Counter, max_rows: int = MAX_ROWS,
+                prices: dict[str, int] | None = None) -> list[Line]:
     fish, items = split_counts(counts)
     lines = [Line(f"⏱ {elapsed}", "title")]
     if not fish and not items:
         lines.append(Line("Nada pego ainda", "empty"))
-    lines += _section("Peixes", fish, max_rows)
-    lines += _section("Itens", items, max_rows)
+    lines += _section("Peixes", fish, max_rows, prices, f"Total ({CURRENCY})")
+    lines += _section("Itens", items, max_rows, prices)
     lines += _section("Iscas gastas", _sorted_rows(baits_used), max_rows)
     return lines
 
@@ -175,17 +187,22 @@ class Overlay(tk.Toplevel):
         styles = {
             "title": (FONT_TITLE, FG, 0), "head": (FONT_BOLD, HEAD, 4),
             "row": (FONT, FG, 0), "more": (FONT, MUTED, 0), "empty": (FONT, MUTED, 2),
+            "total": (FONT_BOLD, MONEY, 2),
         }
         font, color, top = styles.get(line.style, (FONT, FG, 0))
-        indent = 10 if line.style in ("row", "more") else 0
+        indent = 10 if line.style in ("row", "more", "total") else 0
         label = tk.Label(self._body, text=line.text, font=font, fg=color, bg=BG, anchor="w")
-        span = 1 if line.qty is not None else 2
+        span = 1 if line.qty is not None or line.value is not None else 3
         label.grid(row=row, column=0, columnspan=span, sticky="w", padx=(indent, 0), pady=(top, 0))
         self._bind_drag(label)
-        if line.qty is not None:
-            qty = tk.Label(self._body, text=str(line.qty), font=FONT_BOLD, fg=QTY, bg=BG, anchor="e")
-            qty.grid(row=row, column=1, sticky="e", padx=(12, 0))
-            self._bind_drag(qty)
+        cells = ((1, str(line.qty) if line.qty is not None else None, QTY),
+                 (2, money(line.value) if line.value is not None else None, MONEY))
+        for column, text, fg in cells:
+            if text is None:
+                continue
+            cell = tk.Label(self._body, text=text, font=FONT_BOLD, fg=fg, bg=BG, anchor="e")
+            cell.grid(row=row, column=column, sticky="e", padx=(12, 0), pady=(top, 0))
+            self._bind_drag(cell)
 
     # ------------------------------------------------------------ lugar
     def follow(self) -> None:

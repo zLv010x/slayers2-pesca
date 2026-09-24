@@ -240,6 +240,17 @@ class Catalog:
             corrected = how not in (None, "exact") or normalize(name) != key
             return Recorded(canonical_name, best, first_time, corrected)
 
+    def prices(self) -> dict[str, int]:
+        """Preço de venda da unidade de cada item ({nome certo: preço}), da ficha. Inválido fica de fora."""
+        with self._lock:
+            entries = self._entries()
+        out = {}
+        for entry in entries.values():
+            price = entry.get("price")
+            if isinstance(price, int) and not isinstance(price, bool) and price >= 0:
+                out[entry["name"]] = price
+        return out
+
     def _fixed_rarity(self, key: str) -> str | None:
         """Raridade escrita na ficha do compartilhado (None = não tem ou está errada)."""
         rarity = self.shared.get(key, {}).get("rarity")

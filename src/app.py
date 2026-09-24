@@ -70,6 +70,7 @@ class App(ctk.CTk):
         self.compass.load(COMPASS_FILE)
         self.catalog = Catalog(config.CATALOG_DIR, config.CATALOG_LOCAL_DIR)
         self._tidy_catalog()
+        self._prices = self.catalog.prices()  # valor dos peixes no overlay (fichas do catálogo)
         self.baits = BaitState.load(BAIT_FILE)
         self._fisher: Fisher | None = None
         self._bait_check_pending = False
@@ -290,7 +291,7 @@ class App(ctk.CTk):
     def _update_overlay(self) -> None:
         try:
             elapsed, counts, baits = self.session.overlay_snapshot()
-            self.overlay.refresh(overlay.build_lines(elapsed, counts, baits))
+            self.overlay.refresh(overlay.build_lines(elapsed, counts, baits, prices=self._prices))
             self.overlay.follow()
         except Exception:  # o overlay é só para ver: nunca pode atrapalhar a macro
             if not self._overlay_failed:
