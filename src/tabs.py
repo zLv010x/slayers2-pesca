@@ -265,6 +265,15 @@ class SetupTab:
         self.minimize.pack(side="left")
         if cfg["ui"].get("minimize_on_start", True):
             self.minimize.select()
+        r = row(box)
+        self.overlay_on = ctk.CTkSwitch(r, text="Overlay por cima do jogo", command=self._save_overlay)
+        self.overlay_on.pack(side="left")
+        if cfg["ui"].get("overlay", True):
+            self.overlay_on.select()
+        ctk.CTkButton(r, text="Voltar para a party", width=130, fg_color="#374151",
+                      command=app.reset_overlay).pack(side="right")
+        hint(box, "Mostra tempo, peixes, itens e iscas gastas. Arraste para mudar de lugar "
+                  "(com a pesca parada; pescando, os cliques passam através dele).")
         hint(box, "No Roblox: desligue Screen Shake e Shift Lock, senão a câmera mexe durante a pesca.")
         self.refresh()
 
@@ -299,6 +308,11 @@ class SetupTab:
 
     def _save_minimize(self) -> None:
         self.app.cfg["ui"]["minimize_on_start"] = bool(self.minimize.get())
+        self.app.save_soon()
+
+    def _save_overlay(self) -> None:
+        self.app.cfg["ui"]["overlay"] = bool(self.overlay_on.get())
+        self.app.apply_overlay()
         self.app.save_soon()
 
     def _save_on_top(self) -> None:

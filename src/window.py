@@ -16,6 +16,8 @@ kernel32 = ctypes.windll.kernel32
 ROBLOX_EXE = "robloxplayerbeta.exe"
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 SW_RESTORE = 9
+SW_HIDE = 0
+SW_SHOWNOACTIVATE = 4
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 ES_DISPLAY_REQUIRED = 0x00000002
@@ -23,6 +25,17 @@ MIN_CLIENT_PX = 200
 GA_ROOT = 2
 WDA_NONE = 0x0
 WDA_EXCLUDEFROMCAPTURE = 0x11
+GWL_EXSTYLE = -20
+WS_EX_TRANSPARENT = 0x20
+WS_EX_TOOLWINDOW = 0x80
+WS_EX_APPWINDOW = 0x40000
+WS_EX_LAYERED = 0x80000
+WS_EX_NOACTIVATE = 0x08000000
+# SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED: só reaplica o estilo
+SWP_STYLE_ONLY = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020
+# SWP_NOSIZE | SWP_NOACTIVATE: só muda o lugar (e mantém por cima de tudo)
+SWP_MOVE_ONLY = 0x0001 | 0x0010
+HWND_TOPMOST = ctypes.c_void_p(-1)
 
 _EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -95,14 +108,49 @@ def client_rect(hwnd: int) -> Rect | None:
     return Rect(pt.x, pt.y, w, h)
 
 
+def root_hwnd(tk_widget) -> int:
+    """Janela de verdade (topo) de um widget do Tk."""
+    return user32.GetAncestor(tk_widget.winfo_id(), GA_ROOT)
+
+
 def set_capture_excluded(tk_widget, on: bool) -> bool:
     """Deixa a janela da macro invisível para prints de tela (a macro não se vê por cima
     do Roblox). Precisa do Windows 10 2004+; devolve False se não deu."""
     try:
-        hwnd = user32.GetAncestor(tk_widget.winfo_id(), GA_ROOT)
+        hwnd = root_hwnd(tk_widget)
         return bool(user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE if on else WDA_NONE))
     except (OSError, AttributeError):
         return False
+
+
+def set_overlay_style(tk_widget, clickthrough: bool) -> bool:
+    """Janela que não rouba o foco do Roblox nem aparece na barra de tarefas;
+    com `clickthrough`, os cliques passam direto para o que estiver embaixo."""
+    try:
+        hwnd = root_hwnd(tk_widget)
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        style = (style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED) & ~WS_EX_APPWINDOW
+        style = style | WS_EX_TRANSPARENT if clickthrough else style & ~WS_EX_TRANSPARENT
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+        return bool(user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_STYLE_ONLY))
+    except (OSError, AttributeError):
+        return False
+
+
+def show_no_activate(tk_widget, visible: bool) -> None:
+    """Mostra/esconde sem ativar a janela (o deiconify do Tk ativaria e tiraria o Roblox da frente)."""
+    user32.ShowWindow(root_hwnd(tk_widget), SW_SHOWNOACTIVATE if visible else SW_HIDE)
+
+
+def move_no_activate(tk_widget, x: int, y: int) -> None:
+    """Move pelo Windows direto (com a janela escondida por fora do Tk, o geometry do Tk não move)."""
+    user32.SetWindowPos(root_hwnd(tk_widget), HWND_TOPMOST, int(x), int(y), 0, 0, SWP_MOVE_ONLY)
+
+
+def window_xy(tk_widget) -> tuple[int, int]:
+    r = wintypes.RECT()
+    user32.GetWindowRect(root_hwnd(tk_widget), ctypes.byref(r))
+    return r.left, r.top
 
 
 def keep_awake(on: bool) -> None:

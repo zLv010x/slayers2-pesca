@@ -15,6 +15,7 @@ from PIL import Image
 
 import config
 import logbook
+import overlay
 import screen
 import shortcut
 import window
@@ -81,6 +82,10 @@ class App(ctk.CTk):
         self._snapshot = None  # mantém a imagem viva (senão o Tk apaga)
 
         self._build()
+        self._roblox_hwnd: int | None = None
+        self._overlay_failed = False
+        self.overlay = overlay.Overlay(self, self._overlay_rect, self._overlay_moved,
+                                       config.PARTY_ZONE, self.cfg["ui"].get("overlay_pos"))
         self.apply_on_top()
         self.register_hotkeys()
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -240,7 +245,47 @@ class App(ctk.CTk):
 
     def _tick(self) -> None:
         self._refresh_stats()
+        self._update_overlay()
         self.after(TICK_MS, self._tick)
+
+    # ------------------------------------------------------------ overlay
+    def _overlay_rect(self) -> window.Rect | None:
+        """Onde o jogo está, só lendo (sem trazer o Roblox para a frente). None = esconder:
+        overlay desligado, jogo fechado, ou nem o Roblox nem a macro na frente."""
+        if not self.cfg["ui"].get("overlay", True):
+            return None
+        if not self._roblox_hwnd or window.client_rect(self._roblox_hwnd) is None:
+            self._roblox_hwnd = window.find_roblox()
+        if self._roblox_hwnd is None:
+            return None
+        if not (window.is_foreground(self._roblox_hwnd) or window.is_foreground(window.root_hwnd(self))):
+            return None
+        return window.client_rect(self._roblox_hwnd)
+
+    def _overlay_moved(self, pos: dict) -> None:
+        self.cfg["ui"]["overlay_pos"] = pos
+        self.save_soon()
+
+    def _update_overlay(self) -> None:
+        try:
+            elapsed, counts, baits = self.session.overlay_snapshot()
+            self.overlay.refresh(overlay.build_lines(elapsed, counts, baits))
+            self.overlay.follow()
+        except Exception:  # o overlay é só para ver: nunca pode atrapalhar a macro
+            if not self._overlay_failed:
+                self._overlay_failed = True
+                logbook.get().exception("Erro no overlay")
+
+    def apply_overlay(self) -> None:
+        if not self.cfg["ui"].get("overlay", True):
+            self.overlay.hide()
+        self._update_overlay()
+
+    def reset_overlay(self) -> None:
+        self.cfg["ui"]["overlay_pos"] = None
+        self.save_soon()
+        self.overlay.reset_position()
+        self.set_status("Overlay de volta para cima da party.")
 
     def _refresh_stats(self) -> None:
         s = self.session
@@ -272,6 +317,7 @@ class App(ctk.CTk):
         if not window.set_capture_excluded(self, True):
             logbook.get().warning("Não deu para esconder a janela da macro dos prints (Windows antigo?)")
         self._render_running()
+        self.overlay.set_clickthrough(True)  # pescando: nenhum clique da macro pode parar no overlay
         cb = Callbacks(status=lambda m: self.post(lambda: self.set_status(m)),
                        loot=lambda items, snap: self.post(lambda: self._on_loot(items, snap)),
                        bait=lambda text, warn: self.post(lambda: self._show_bait(text, warn)))
@@ -329,6 +375,7 @@ class App(ctk.CTk):
             self._restore_window()
         self.session.pause()
         window.set_capture_excluded(self, False)
+        self.overlay.set_clickthrough(False)
         self._render_running()
         self.set_status(reason)
         self._refresh_stats()

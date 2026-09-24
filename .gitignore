@@ -13,3 +13,4 @@ catalogo_local/
 *.slnx
 
 *.lnk
+.claude/

@@ -82,3 +82,23 @@ def test_perto_do_fim_nao_fica_abrindo_o_menu_toda_hora():
     assert s.needs_check(10, INF)
     s.mark_checked()                  # conferiu: acabou mesmo e não tinha outra
     assert not s.needs_check(10, INF)
+
+
+def test_consume_devolve_a_isca_gasta():
+    s = _state(fish=5)
+    s.equipped = "Fish Head"
+    assert s.consume(10, INF) == "Fish Head"
+
+
+def test_consume_conta_mesmo_sem_saber_quantas_tem():
+    s = _state(worm=None)
+    s.equipped = "Worm"
+    assert s.consume(10, INF) == "Worm"
+
+
+def test_consume_isca_que_nao_gasta_ou_sem_isca_devolve_none():
+    s = _state(lure=None)
+    s.equipped = "Drowned Lure"
+    assert s.consume(10, INF) is None
+    s.equipped = None
+    assert s.consume(10, INF) is None

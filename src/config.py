@@ -73,7 +73,9 @@ DEFAULTS: dict = {
         "infinite": ["Drowned Lure"],   # iscas que não gastam
         "recheck_at": 10,               # confere o inventário quando faltarem isso
     },
-    "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True},
+    # overlay_pos: {"x", "y"} em fração da janela do Roblox (None = em cima da party)
+    "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True,
+           "overlay": True, "overlay_pos": None},
     "config_rev": 3,
 }
 CONFIG_REV = DEFAULTS["config_rev"]

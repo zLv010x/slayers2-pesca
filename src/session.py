@@ -29,6 +29,7 @@ class Session:
     rarities: Counter = field(default_factory=Counter)    # raridade -> nº de drops
     catches: int = 0                                       # nº de drops (cada coleta = 1)
     misses: int = 0                                        # minigames perdidos / sem aviso
+    baits_used: Counter = field(default_factory=Counter)  # isca -> quantas gastou nesta sessão
     last: list[tuple[str, str, int, str]] = field(default_factory=list)  # (hora, nome, qtd, raridade)
     _csv_path: Path | None = None
     _active_sec: float = 0.0            # tempo pescando nas rodadas anteriores
@@ -82,6 +83,15 @@ class Session:
     def record_miss(self) -> None:
         with self._lock:
             self.misses += 1
+
+    def record_bait(self, name: str) -> None:
+        with self._lock:
+            self.baits_used[name] += 1
+
+    def overlay_snapshot(self) -> tuple[str, Counter, Counter]:
+        """Tempo, itens e iscas gastas (cópias: o overlay lê na thread da interface)."""
+        with self._lock:
+            return self.elapsed_text(), Counter(self.counts), Counter(self.baits_used)
 
     def _append_csv(self, when: datetime, name: str, quantity: int, rarity: str) -> None:
         # Escrita em disco (OneDrive/antivírus podem travar o arquivo): nunca pode derrubar o

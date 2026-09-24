@@ -601,7 +601,9 @@ class Fisher:
         self.collect()
         if self._baits_on():
             # o jogo gasta 1 isca a cada mordida resolvida (pegando ou não)
-            self.baits.consume(time.perf_counter() - cycle_start, self.cfg["baits"]["infinite"])
+            spent = self.baits.consume(time.perf_counter() - cycle_start, self.cfg["baits"]["infinite"])
+            if spent:
+                self.session.record_bait(spent)
             if self.bait_path is not None:
                 self.baits.save(self.bait_path)
             self._report_bait()

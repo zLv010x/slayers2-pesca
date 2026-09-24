@@ -66,15 +66,20 @@ class BaitState:
     def is_infinite(self, infinite: list[str]) -> bool:
         return self.equipped in infinite
 
-    def consume(self, cycle_sec: float, infinite: list[str]) -> None:
-        """Um minigame foi jogado: gasta 1 da isca equipada (se ela gasta)."""
+    def consume(self, cycle_sec: float, infinite: list[str]) -> str | None:
+        """Um minigame foi jogado: gasta 1 da isca equipada (se ela gasta).
+
+        Devolve o nome da isca gasta (para a contagem da sessão), ou None."""
         if cycle_sec > 0:
             self.avg_cycle_sec = (cycle_sec if self.avg_cycle_sec <= 0
                                   else (1 - AVG_WEIGHT) * self.avg_cycle_sec + AVG_WEIGHT * cycle_sec)
         self.since_check += 1
+        if not self.equipped or self.equipped in infinite:
+            return None
         left = self.remaining()
-        if self.equipped and self.equipped not in infinite and left is not None:
+        if left is not None:
             self.counts[self.equipped] = max(0, left - 1)
+        return self.equipped
 
     def eta_seconds(self, infinite: list[str]) -> float | None:
         left = self.remaining()

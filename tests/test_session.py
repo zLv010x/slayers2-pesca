@@ -114,3 +114,18 @@ def test_historico_guarda_itens_antigos_para_o_filtro():
     for _ in range(200):
         s.record("Coral", 1, "common")
     assert [n for _, n, _, _ in s.recent({"mythic"})] == ["Black Dragon Armour"]
+
+
+def test_iscas_gastas_por_tipo_e_snapshot_e_copia():
+    s = Session()
+    s.record_bait("Worm")
+    s.record_bait("Worm")
+    s.record_bait("Fish Head")
+    s.record("Clown Fish", 2, "rare")
+    elapsed, counts, baits = s.overlay_snapshot()
+    assert baits == {"Worm": 2, "Fish Head": 1}
+    assert counts == {"Clown Fish": 2}
+    assert elapsed == s.elapsed_text()
+    counts["Clown Fish"] = 99
+    baits["Worm"] = 99
+    assert s.counts["Clown Fish"] == 2 and s.baits_used["Worm"] == 2
