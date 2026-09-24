@@ -4,8 +4,8 @@ title Slayers 2 - Pesca (instalacao)
 cd /d "%~dp0"
 rem Procura o Python: primeiro o "py" (instalador do python.org), depois o "python".
 set "PY="
-where py >/dev/null 2>/dev/null && set "PY=py -3"
-if not defined PY where python >/dev/null 2>/dev/null && set "PY=python"
+where py >nul 2>nul && set "PY=py -3"
+if not defined PY where python >nul 2>nul && set "PY=python"
 if not defined PY (
     echo Python nao encontrado.
     echo Instale em https://www.python.org/downloads/ e marque "Add python.exe to PATH".
