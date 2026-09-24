@@ -842,8 +842,8 @@ def test_camera_varre_quando_bussola_nao_encontrada(auto_camera_env):
     ok = f._auto_fix_camera(tol=6, drift=None)
     assert ok is True
     assert abs(compass.pos) <= 6
-    # varreu pelo menos as 5 vezes que a bússola ficou escondida
-    assert len(compass.drags) >= 5
+    # conferiu de novo antes de girar e varreu até achar
+    assert len(compass.drags) >= 5 - cycle.AUTO_CAMERA_RECHECKS
 
 
 def test_camera_desiste_da_varredura_apos_a_volta_inteira(auto_camera_env):
@@ -935,3 +935,28 @@ def test_camera_poe_o_cursor_no_ponto_de_lancamento_antes_de_girar(auto_camera_e
     assert f._auto_fix_camera(tol=6, drift=40)
     assert events[0] == ("move", 50, 25)
     assert all(e[0] == "drag" for e in events[1:])
+
+
+def test_ganho_nao_muda_com_movimento_minusculo():
+    """Revisão de 24/09: bússola mexendo 1 px depois de um arrasto grande não é medida
+    confiável; aprender com ela faria o ganho explodir e a câmera passar do ponto."""
+    f = FakeFisher([])
+    f._camera_gain = 3.0
+    f._learn_gain(drift_before=50, dx=300, drift_after=49)
+    assert f._camera_gain == 3.0
+
+
+def test_ganho_volta_ao_padrao_quando_o_ajuste_falha(auto_camera_env):
+    compass = FakeCompassAuto(drift0=50, real_gain=0.4, none_calls=999)
+    f = auto_camera_env(compass)
+    f._camera_gain = 42.0
+    assert f._auto_fix_camera(tol=6, drift=None) is False
+    assert f._camera_gain == cycle.AUTO_CAMERA_DEFAULT_GAIN
+
+
+def test_bussola_sumida_um_quadro_nao_varre(auto_camera_env):
+    """Uma notificação cobrindo a bússola por um instante não pode girar a câmera inteira."""
+    compass = FakeCompassAuto(drift0=0, real_gain=0.4, none_calls=1)
+    f = auto_camera_env(compass)
+    assert f._auto_fix_camera(tol=6, drift=None) is True
+    assert compass.drags == []

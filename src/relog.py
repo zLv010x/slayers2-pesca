@@ -226,17 +226,11 @@ def _find_reconnect_by_color(frame: np.ndarray, title: ocr.Line) -> tuple[int, i
 
 def _detect_main_menu(frame: np.ndarray) -> Screen | None:
     """Mesma região/heurística de menu.is_main_menu, só que também acha o PLAY."""
-    fh, fw = frame.shape[:2]
-    region = frame[int(menu.REGION_Y[0] * fh):int(menu.REGION_Y[1] * fh),
-                    int(menu.REGION_X[0] * fw):int(menu.REGION_X[1] * fw)]
+    region, ox, oy = menu.menu_region(frame)
     if region.size == 0:
         return None
-    ox, oy = int(menu.REGION_X[0] * fw), int(menu.REGION_Y[0] * fh)
-    found: dict[str, ocr.Line] = {}
-    for line in ocr.read_lines(region, min_height=menu.OCR_UPSCALE * region.shape[0]):
-        for word in _words(line.text):
-            found.setdefault(word, line)
-    if len(set(found) & menu.MENU_WORDS) < menu.MIN_WORDS:
+    found = menu.find_menu_words(region)
+    if not menu.looks_like_menu(found):  # 3 de 4 na ordem: o PLAY fica na área da party
         return None
     play = found.get("play")
     play_pos = (ox + play.x + play.w // 2, oy + play.y + play.h // 2) if play else None

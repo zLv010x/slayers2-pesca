@@ -78,6 +78,11 @@ AUTO_CAMERA_MAX_TRIES = 8
 # Bússola não achada: varre girando em passos de ~1/12 de volta, cobrindo a volta inteira.
 AUTO_CAMERA_SWEEP_STEPS = 12
 AUTO_CAMERA_SWEEP_STEP_PX = 400
+# Bússola sumida: confere de novo antes de varrer (uma notificação pode cobrir um quadro).
+AUTO_CAMERA_RECHECKS = 2
+AUTO_CAMERA_RECHECK_SEC = 0.3
+# Bússola mexendo menos que isso depois de um arrasto não serve para aprender o ganho.
+AUTO_CAMERA_MIN_MOVED_PX = 3
 
 log = logbook.get()
 
@@ -285,7 +290,7 @@ class Fisher:
         """Ajusta o ganho (px de arrasto por px de bússola) pela resposta medida, sinal incluído:
         se o sentido do arrasto estiver invertido, o ganho aprendido também inverte sozinho."""
         moved = drift_before - drift_after  # quanto a bússola realmente voltou com esse arrasto
-        if dx == 0 or moved == 0:
+        if dx == 0 or abs(moved) < AUTO_CAMERA_MIN_MOVED_PX:
             return
         gain = dx / moved
         gain = max(-AUTO_CAMERA_MAX_GAIN, min(AUTO_CAMERA_MAX_GAIN, gain))
@@ -308,9 +313,27 @@ class Fisher:
     def _auto_fix_camera(self, tol: int, drift: int | None) -> bool:
         """Tenta girar a câmera sozinha antes de pausar. True = ficou dentro da tolerância.
 
-        `drift` é a medição que o chamador já fez (evita gastar um quadro à toa).
+        `drift` é a medição que o chamador já fez (evita gastar um quadro à toa). Se não
+        der certo, o ganho volta ao padrão (um ganho ruim não fica para o resto da noite).
         """
+        ok = self._try_fix_camera(tol, drift)
+        if not ok:
+            self._camera_gain = AUTO_CAMERA_DEFAULT_GAIN
+        return ok
+
+    def _recheck_compass(self) -> int | None:
+        for _ in range(AUTO_CAMERA_RECHECKS):
+            self.sleep(AUTO_CAMERA_RECHECK_SEC)
+            _, img = self.frame()
+            drift = self.compass.drift_px(img)
+            if drift is not None:
+                return drift
+        return None
+
+    def _try_fix_camera(self, tol: int, drift: int | None) -> bool:
         self._park_cursor_for_camera()
+        if drift is None:
+            drift = self._recheck_compass()
         if drift is None:
             drift = self._sweep_for_compass()
             if drift is None:

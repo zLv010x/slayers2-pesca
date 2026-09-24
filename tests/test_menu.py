@@ -34,3 +34,26 @@ def test_uma_palavra_so_nao_basta(monkeypatch, shot):
 
 def test_imagem_vazia_nao_quebra():
     assert not menu.is_main_menu(None)
+
+
+def _fake_lines(monkeypatch, *words_y):
+    from ocr import Line
+    monkeypatch.setattr(menu.ocr, "read_lines",
+                        lambda img, min_height=0: [Line(w, 0, y, 40, 10) for w, y in words_y])
+
+
+def test_duas_palavras_nao_bastam(monkeypatch, shot):
+    """Revisão de 24/09: o PLAY fica na área da party; amigos chamados "Play" e "Hub"
+    não podem virar menu (o relog clicaria na party)."""
+    _fake_lines(monkeypatch, ("Play", 0), ("Hub", 40))
+    assert not menu.is_main_menu(shot("idle_com_vara.webp"))
+
+
+def test_tres_palavras_fora_de_ordem_nao_e_menu(monkeypatch, shot):
+    _fake_lines(monkeypatch, ("Hub", 0), ("Play", 40), ("Slots", 80))
+    assert not menu.is_main_menu(shot("idle_com_vara.webp"))
+
+
+def test_tres_palavras_na_ordem_do_menu(monkeypatch, shot):
+    _fake_lines(monkeypatch, ("Play", 0), ("Customize", 40), ("Slots", 120))
+    assert menu.is_main_menu(shot("idle_com_vara.webp"))
