@@ -50,11 +50,10 @@ ADVANCED_FIELDS = {
     ],
     "tracking": [
         ("task_fps", "FPS do minigame", "Prints por segundo no minigame. Baixe se o PC travar."),
-        ("latency_s", "Latência (s)", "Quanto prevê à frente. Aumente se passar da zona verde."),
-        ("hysteresis_px", "Zona morta (px)", "Maior = segura/solta com menos frequência."),
-        ("aim_offset", "Mira (alturas do quadrado)", "Negativo mira acima do centro da zona."),
-        ("accel_hold", "Aceleração segurando", "Quanto o quadrado sobe segurando."),
-        ("accel_release", "Aceleração soltando", "Quanto o quadrado desce soltando."),
+        ("lead_s", "Atraso extra (s)", "Aumente se o quadrado passar da zona verde (reage tarde)."),
+        ("deadband", "Zona morta", "Maior = segura/solta com menos frequência (0 a 1)."),
+        ("accel", "Aceleração do quadrado", "Maior = a macro acha que o quadrado freia mais rápido."),
+        ("zone_memory_s", "Memória da zona (s)", "Usa a última zona verde vista por esse tempo."),
     ],
 }
 
@@ -106,12 +105,14 @@ class SessionTab:
         head = ctk.CTkFrame(parent, fg_color="transparent")
         head.pack(fill="x")
         ctk.CTkLabel(head, text="Histórico", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left", padx=4)
-        self.show_recent = ctk.CTkSwitch(head, text="mostrar", command=self._toggle_recent)
+        self.show_recent = ctk.CTkSwitch(head, text="ver", width=60, command=self._toggle_recent)
         self.show_recent.pack(side="right")
-        ctk.CTkButton(head, text="Abrir logs", width=90, height=24, fg_color="#374151",
+        ctk.CTkButton(head, text="Logs", width=54, height=24, fg_color="#374151",
                       command=app.open_logs).pack(side="right", padx=8)
-        ctk.CTkButton(head, text="Zerar", width=60, height=24, fg_color="#374151",
+        ctk.CTkButton(head, text="Zerar", width=54, height=24, fg_color="#374151",
                       command=app.new_session).pack(side="right")
+        ctk.CTkButton(head, text="Exportar", width=74, height=24, fg_color="#374151",
+                      command=app.export_logs).pack(side="right", padx=(0, 8))
         if app.cfg["ui"].get("show_recent", True):
             self.show_recent.select()
         self.recent = ctk.CTkScrollableFrame(parent, fg_color=CARD, corner_radius=10, height=170)

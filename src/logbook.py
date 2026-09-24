@@ -20,6 +20,7 @@ LOG_NAME = "pesca"
 MAX_BYTES = 5 * 1024 * 1024
 BACKUPS = 5
 MAX_EVIDENCE = 200
+MAX_MINIGAME_FRAMES = 300
 FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s %(module)s: %(message)s"
 DATEFMT = "%Y-%m-%d %H:%M:%S"
 
@@ -79,3 +80,48 @@ def save_evidence(img: np.ndarray | None, reason: str) -> Path | None:
         get().warning("Não consegui salvar o print (%s): %s", reason, exc)
         return None
 
+
+
+def save_minigame_frame(img: np.ndarray, reading, holding: bool) -> None:
+    """Recorte da barra durante o minigame, com o que a macro leu no nome do arquivo."""
+    if _evidence_dir is None:
+        return
+    if reading is None:
+        tag = "sem-leitura"
+    else:
+        zone = f"zona{reading.zone_top}-{reading.zone_bot}" if reading.has_zone else "sem-zona"
+        tag = f"quadrado{int(reading.ball_y)}-{zone}"
+    tag += "-segurando" if holding else "-solto"
+    try:
+        _save_png(_evidence_dir.parent / "minigame", img, tag, MAX_MINIGAME_FRAMES)
+    except (OSError, cv2.error) as exc:
+        get().warning("Não consegui salvar o recorte do minigame: %s", exc)
+
+
+def export_bundle(root: Path, dest_dir: Path) -> Path:
+    """ZIP com tudo que ajuda a achar bugs, SEM segredos (link do webhook e ID ficam de fora)."""
+    import json
+    import zipfile
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    out = dest_dir / f"slayers2-logs-{datetime.now():%Y%m%d-%H%M}.zip"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for folder in ("logs",):
+            for f in (root / folder).rglob("*"):
+                if f.is_file():
+                    z.write(f, f.relative_to(root))
+        for rel in ("calibracao/iscas.json", "catalogo_local/itens.json"):
+            if (root / rel).exists():
+                z.write(root / rel, rel)
+        cfg_path = root / "config.json"
+        if cfg_path.exists():
+            try:
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                discord = cfg.get("discord", {})
+                for secret in ("webhook_url", "user_id"):
+                    if discord.get(secret):
+                        discord[secret] = "(removido)"
+                z.writestr("config_sem_segredos.json", json.dumps(cfg, indent=2, ensure_ascii=False))
+            except (OSError, ValueError):
+                pass
+    return out

@@ -6,6 +6,7 @@ config.json
 config.json.*
 calibracao/
 logs/
+logs_para_enviar/
 catalogo_local/
 # Arquivos do Visual Studio / VS Code
 .vs/
