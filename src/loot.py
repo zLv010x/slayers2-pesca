@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 
 import ocr
+from catalog import plausible_name
 
 # Área onde o aviso aparece: à direita do personagem, que fica no centro da tela.
 REGION_X = (0.49, 0.80)
@@ -213,7 +214,7 @@ def _read_popups_once(frame: np.ndarray, threshold: int | None, upscale: int) ->
     found: list[Loot] = []
     for line in lines:
         name = clean_name(line.text)
-        if len(name) < MIN_NAME_LEN or _parse_qty(name) is not None:
+        if len(name) < MIN_NAME_LEN or _parse_qty(name) is not None or not plausible_name(name):
             continue
         x, y = line.x + rx0, line.y + ry0
         is_new = False

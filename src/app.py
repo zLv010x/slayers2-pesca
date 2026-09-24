@@ -380,7 +380,9 @@ class App(ctk.CTk):
         self.set_status(reason)
         self._refresh_stats()
         # F1/botão/fechar já marcam self._stop: só reinicia sozinho quando NÃO foi pedido.
-        if not self._stop.is_set():
+        # No menu principal (servidor reiniciou) reiniciar não adianta: precisa alguém entrar no jogo.
+        for_good = self._fisher is not None and self._fisher.stop_for_good
+        if not self._stop.is_set() and not for_good:
             self._schedule_auto_restart(reason)
 
     def _cancel_auto_restart(self) -> None:

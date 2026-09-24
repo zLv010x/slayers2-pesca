@@ -37,10 +37,19 @@ IMAGES_DIR = "imagens"
 FUZZY_MIN_LEN = 6
 FUZZY_CUTOFF = 0.88
 SHARED_FIELDS = ("name", "slug", "image", "rarity", "rarity_votes", "aliases")
+# Nome de item tem pelo menos 3 letras ("Ore"): "6d" (prazo dos códigos no menu principal)
+# e textos da própria tela ("Collect", "item") não são itens.
+MIN_NAME_LETTERS = 3
+IGNORED_NAMES = {"item", "collect"}
 
 
 def normalize(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def plausible_name(name: str) -> bool:
+    letters = re.sub(r"[^A-Za-z]", "", name)
+    return len(letters) >= MIN_NAME_LETTERS and name.strip().lower() not in IGNORED_NAMES
 
 
 def slugify(name: str) -> str:
@@ -175,6 +184,8 @@ class Catalog:
         added: list[str] = []
         with self._lock:
             for key, local in self.local.items():
+                if not plausible_name(local.get("name", "")):
+                    continue  # lixo de OCR que entrou antes do filtro: não vai para os amigos
                 shared = self.shared.get(key)
                 if shared is None:
                     shared = {f: local.get(f) for f in SHARED_FIELDS}

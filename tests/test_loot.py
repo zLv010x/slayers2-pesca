@@ -125,3 +125,15 @@ def test_aviso_pequeno_em_janela_1002(shot):
     # print real do Inside (Roblox em janela 1002x981): nome com ~9 px e aviso apagando
     loot = read_popup(shot("popup_janela_1002.webp"))
     assert loot is not None and (loot.name, loot.quantity) == ("Zebra Fish", 1)
+
+
+def test_nome_sem_letras_suficientes_e_lixo():
+    # 24/09 02:28: no menu principal, o "6d" do painel de códigos virou um "item"
+    import loot
+    assert not loot.plausible_name("6d")
+    assert not loot.plausible_name("x2")
+    assert not loot.plausible_name("Collect")
+    assert not loot.plausible_name("item")
+    assert loot.plausible_name("Ore")
+    assert loot.plausible_name("Zebra Fish")
+    assert loot.plausible_name("OuwFish")

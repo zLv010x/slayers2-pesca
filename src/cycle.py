@@ -22,6 +22,7 @@ import bait_menu
 import hotbar
 import logbook
 import loot as loot_mod
+import menu
 import prompt as prompt_mod
 import screen
 import window
@@ -59,6 +60,8 @@ FOREGROUND_POLL_SEC = 0.5
 STATS_EVERY_CYCLES = 10
 # Conferência de iscas que falhou: tenta de novo depois de tantos ciclos.
 BAIT_RETRY_CYCLES = 20
+# Bússola sumida: confere se o jogo voltou para o menu principal a cada tanto (OCR ~50 ms).
+MENU_CHECK_SEC = 5.0
 
 log = logbook.get()
 
@@ -118,6 +121,7 @@ class Fisher:
         self.failed_casts = 0
         self.recoveries = 0
         self.cycles = 0
+        self.stop_for_good = False  # parada em que reiniciar sozinho não adianta (menu principal)
         self._last_status = ""
         self._status_cb = cb.status
         cb.status = self._status
@@ -215,10 +219,14 @@ class Fisher:
         if not self.cfg.get("compass_lock", True) or not self.compass.ready:
             return
         tol = int(self.cfg.get("compass_tolerance_px", 6))
-        paused_at, notified = None, False
+        paused_at, notified, menu_checked = None, False, None
         while True:
             _, img = self.frame()
             drift = self.compass.drift_px(img)
+            now = time.perf_counter()
+            if drift is None and (menu_checked is None or now - menu_checked >= MENU_CHECK_SEC):
+                menu_checked = now
+                self._stop_if_main_menu(img)  # sem bússola porque nem há personagem?
             if drift is not None and abs(drift) <= tol:
                 if paused_at is not None:
                     log.info("Câmera voltou para a posição (desvio %+dpx).", drift)
@@ -622,6 +630,7 @@ class Fisher:
         """Registra o problema, avisa, espera e deixa o laço tentar de novo."""
         self.mouse.release()
         screen.release_key("t")
+        self._stop_if_main_menu(img if img is not None else self._safe_shot())
         self.recoveries += 1
         limit = int(self.cfg["limits"]["max_recoveries"])
         logbook.save_evidence(img, msg)
@@ -635,6 +644,24 @@ class Fisher:
                      ping=self.recoveries == 1)
         self.cb.status(f"Recuperando ({self.recoveries}/{limit}): {msg}. Nova tentativa em {wait:.0f}s.")
         self.sleep(wait)
+
+    def _stop_if_main_menu(self, img: np.ndarray | None) -> None:
+        """No menu principal não há personagem: tentar de novo não adianta, então para de vez e avisa."""
+        try:
+            on_menu = menu.is_main_menu(img)
+        except Exception:  # OCR falhou: segue como um problema comum
+            log.exception("Não consegui conferir se o jogo está no menu principal")
+            return
+        if not on_menu:
+            return
+        key = self.cfg["hotkeys"]["start_stop"]
+        msg = ("o jogo voltou para o menu principal (o servidor reiniciou ou você caiu). "
+               f"Entre de novo, volte ao ponto de pesca e aperte {key}.")
+        log.error("Menu principal na tela: %s", msg)
+        logbook.save_evidence(img, "menu principal")
+        self._notify("🏠 Pesca parada: " + msg)
+        self.stop_for_good = True
+        raise StopRun("Parei: " + msg)
 
     def _safe_shot(self) -> np.ndarray | None:
         try:

@@ -576,3 +576,61 @@ def test_camera_sem_desvio_nao_espera_mouse_livre(monkeypatch):
     monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: called.append(True))
     f.check_camera()
     assert called == []  # sem pausa nenhuma: não precisa esperar nada extra
+
+
+# ---------------------------------------------------------------- menu principal (servidor reiniciou)
+
+def test_recuperacao_no_menu_principal_para_de_vez_e_avisa(monkeypatch):
+    monkeypatch.setattr(cycle.screen, "release_key", lambda k: None)
+    monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: True)
+    f = FakeFisher([])
+    f.notifier = FakeNotifier()
+    f.cfg["discord"]["notify_problems"] = True
+    f.cfg["timings"]["recovery_wait_sec"] = 999  # se esperasse os 30 s, o teste travaria
+    with pytest.raises(cycle.StopRun):
+        f._recover("não consegui equipar a vara (tecla 3)", object())
+    assert f.stop_for_good  # reiniciar sozinho não adianta: precisa alguém entrar no jogo
+    assert f.recoveries == 0
+    assert len(f.notifier.sent) == 1 and "menu principal" in f.notifier.sent[0][0]
+    assert f.notifier.sent[0][1] is True  # marca você
+
+
+def test_recuperacao_fora_do_menu_segue_normal(monkeypatch):
+    monkeypatch.setattr(cycle.screen, "release_key", lambda k: None)
+    monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: False)
+    f = FakeFisher([])
+    f.notifier = FakeNotifier()
+    f.cfg["timings"]["recovery_wait_sec"] = 0
+    f._recover("teste", object())
+    assert f.recoveries == 1 and not f.stop_for_good
+
+
+def test_bussola_sumida_por_causa_do_menu_para_em_vez_de_pausar_para_sempre(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    checks = []
+    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: checks.append(img) or len(checks) >= 2)
+    f = FakeFisher([None] * 50)
+    f.compass = FakeCompass([None] * 50)
+    f.notifier = FakeNotifier()
+    with pytest.raises(cycle.StopRun):
+        f.check_camera()
+    assert f.stop_for_good
+
+
+def test_camera_girada_nao_procura_menu(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: True)
+    called = []
+    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: called.append(True) or False)
+    f = FakeFisher([None] * 3)
+    f.compass = FakeCompass([40, 40, 0])  # bússola achada, só girada: não é o menu
+    f.check_camera()
+    assert called == []

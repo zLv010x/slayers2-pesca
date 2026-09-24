@@ -102,3 +102,19 @@ def test_erro_ao_salvar_indice_local_nao_derruba_o_registro(dirs, monkeypatch):
     monkeypatch.setattr(catalog_mod, "_save_index", lambda path, items: (_ for _ in ()).throw(OSError("travado")))
     rec = cat.record("Coral", "common", IMG)
     assert rec.name == "Coral" and rec.first_time
+
+
+def test_publicar_nao_leva_nome_lixo_para_o_compartilhado(dirs):
+    # 24/09: "6d" (prazo dos códigos no menu principal) e "Collect" entraram no catálogo local
+    shared, local = dirs
+    cat = Catalog(shared, local)
+    for name in ("6d", "Collect", "Coral"):
+        cat.record(name, "common", IMG)
+    assert cat.publish() == ["Coral"]
+    assert [i["name"] for i in _index(shared)] == ["Coral"]
+
+
+def test_plausible_name_fica_no_catalogo_e_o_loot_usa_o_mesmo():
+    import catalog
+    import loot
+    assert loot.plausible_name is catalog.plausible_name
