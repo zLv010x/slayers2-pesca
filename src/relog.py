@@ -33,6 +33,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+import cv2
 import numpy as np
 
 import menu
@@ -49,6 +50,9 @@ DEFAULTS: dict = {
     "step_timeout_sec": 90,
     "total_timeout_sec": 600,
     "no_reconnect_codes": [264],
+    # quanto tempo "sem tela conhecida" (unknown) até considerar que já voltou ao
+    # jogo, mesmo sem in_game() confirmar (cobre chamar o relog com o jogo já normal)
+    "settle_sec": 8.0,
 }
 
 # --- calibração das posições/textos, ver tests/fixtures/relog_*.webp ---------
@@ -66,6 +70,24 @@ OUTSIDE_CLICK_DY_FRAC = 0.10
 # margem ao redor do dialog Disconnected pra separar a mensagem de texto de fundo
 DIALOG_PAD_X_FRAC = 0.09
 DIALOG_PAD_Y_FRAC = 0.05
+
+# janelas pequenas: o OCR da tela inteira não lê texto pequeno. Além dele, sempre
+# fazemos OCR de dois recortes ampliados 4x e somamos a origem de volta ao frame.
+DIALOG_CROP_X = (0.25, 0.75)
+DIALOG_CROP_Y = (0.30, 0.70)
+LOADING_CROP_X = (0.30, 0.70)
+LOADING_CROP_Y = (0.70, 0.95)
+CROP_UPSCALE = 4
+
+# fallback do botão Reconnect por cor quando o OCR não lê o texto do botão: ele é
+# o único retângulo branco CHEIO logo abaixo do título (o Leave só tem contorno).
+RECONNECT_MIN_CHANNEL = 225  # mínimo dos 3 canais (BGR) pra contar como "branco"
+RECONNECT_MIN_ASPECT = 2.5   # largura / altura mínima de um botão
+RECONNECT_MIN_AREA_PX = 50   # ignora ruído (letras do título também são claras)
+
+# clicar de novo na mesma tela antes desse tempo é desperdício (ou pior: cai já na
+# tela seguinte, ex.: um 2º clique no PLAY cair no painel de amigos do próximo menu)
+CLICK_COOLDOWN_SEC = 5.0
 
 POLL_SEC = 0.5       # intervalo entre olhadas na tela
 HOLD_POLL_SEC = 0.1  # intervalo de checagem durante o JOIN segurado
@@ -105,6 +127,8 @@ def classify(frame: np.ndarray | None, cfg: dict | None = None) -> Screen:
         return Screen(kind="unknown")
     cfg = cfg or {}
     lines = ocr.read_lines(frame)
+    lines += _crop_lines(frame, DIALOG_CROP_X, DIALOG_CROP_Y)
+    lines += _crop_lines(frame, LOADING_CROP_X, LOADING_CROP_Y)
     return (
         _detect_disconnected(frame, lines)
         or _detect_main_menu(frame)
@@ -112,6 +136,20 @@ def classify(frame: np.ndarray | None, cfg: dict | None = None) -> Screen:
         or _detect_server(frame, lines, cfg.get("map_name", DEFAULTS["map_name"]))
         or Screen(kind="unknown")
     )
+
+
+def _crop_lines(frame: np.ndarray, x_range: tuple[float, float],
+                 y_range: tuple[float, float]) -> list[ocr.Line]:
+    """OCR de um recorte ampliado 4x (janela pequena = texto pequeno demais pro OCR
+    ler na tela inteira), com as coordenadas já somadas de volta pro frame."""
+    fh, fw = frame.shape[:2]
+    x0, x1 = int(x_range[0] * fw), int(x_range[1] * fw)
+    y0, y1 = int(y_range[0] * fh), int(y_range[1] * fh)
+    crop = frame[y0:y1, x0:x1]
+    if crop.size == 0:
+        return []
+    lines = ocr.read_lines(crop, min_height=CROP_UPSCALE * crop.shape[0])
+    return [ocr.Line(l.text, l.x + x0, l.y + y0, l.w, l.h) for l in lines]
 
 
 def _bbox(frame: np.ndarray, lines: list[ocr.Line]) -> tuple[float, float, float, float]:
@@ -130,7 +168,8 @@ def _inside(line: ocr.Line, box: tuple[float, float, float, float]) -> bool:
 
 
 def _detect_disconnected(frame: np.ndarray, lines: list[ocr.Line]) -> Screen | None:
-    title = next((l for l in lines if _words(l.text) == {"disconnected"}), None)
+    # título tolerante: em janela pequena o OCR só pega parte de "Disconnected"
+    title = next((l for l in lines if "disconnect" in _squash(l.text)), None)
     reconnect = next((l for l in lines if _squash(l.text) == "reconnect"), None)
     if title is None and reconnect is None:
         return None
@@ -146,13 +185,43 @@ def _detect_disconnected(frame: np.ndarray, lines: list[ocr.Line]) -> Screen | N
             error_code = int(match.group(1))
         else:
             message_parts.append(line.text)
+    reconnect_pos = _center(reconnect) if reconnect else None
+    if reconnect_pos is None and title is not None:
+        reconnect_pos = _find_reconnect_by_color(frame, title)
     return Screen(
         kind="disconnected",
         message=" ".join(message_parts) or None,
         error_code=error_code,
-        reconnect_pos=_center(reconnect) if reconnect else None,
+        reconnect_pos=reconnect_pos,
         leave_pos=_center(leave) if leave else None,
     )
+
+
+def _find_reconnect_by_color(frame: np.ndarray, title: ocr.Line) -> tuple[int, int] | None:
+    """Fallback quando o OCR não lê "Reconnect": procura, dentro do recorte do
+    dialog e abaixo do título, o maior retângulo quase-branco cheio (o Leave é
+    escuro só com contorno, então não entra nesse filtro)."""
+    fh, fw = frame.shape[:2]
+    x0, x1 = int(DIALOG_CROP_X[0] * fw), int(DIALOG_CROP_X[1] * fw)
+    y0, y1 = int(DIALOG_CROP_Y[0] * fh), int(DIALOG_CROP_Y[1] * fh)
+    crop = frame[y0:y1, x0:x1]
+    y_from = title.y - y0
+    if crop.size == 0 or not (0 <= y_from < crop.shape[0]):
+        return None
+    sub = crop[y_from:, :]
+    mask = (np.min(sub, axis=2) >= RECONNECT_MIN_CHANNEL).astype(np.uint8)
+    n, _labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    best_area, best_center = 0, None
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if h == 0 or area < RECONNECT_MIN_AREA_PX or w / h < RECONNECT_MIN_ASPECT:
+            continue
+        if area > best_area:
+            best_area, best_center = area, centroids[i]
+    if best_center is None:
+        return None
+    cx, cy = best_center
+    return (x0 + int(cx), y0 + y_from + int(cy))
 
 
 def _detect_main_menu(frame: np.ndarray) -> Screen | None:
@@ -175,8 +244,11 @@ def _detect_main_menu(frame: np.ndarray) -> Screen | None:
 
 
 def _detect_loading(lines: list[ocr.Line]) -> Screen | None:
-    if any(LOADING_WORD in _words(l.text) for l in lines):
-        return Screen(kind="loading")
+    # em janela pequena "Now Entering..." sai torto (ex.: "owentermg", "owentenng")
+    for l in lines:
+        squashed = _squash(l.text)
+        if LOADING_WORD in squashed or "owent" in squashed:
+            return Screen(kind="loading")
     return None
 
 
@@ -221,6 +293,8 @@ class Relogger:
     cfg: dict
     actions: Any
     _typed_nick: bool = field(default=False, init=False, repr=False)
+    _unknown_since: float | None = field(default=None, init=False, repr=False)
+    _click_times: dict = field(default_factory=dict, init=False, repr=False)
 
     def run(self) -> RelogResult:
         cfg = self.cfg
@@ -229,6 +303,8 @@ class Relogger:
         if cfg.get("server_mode") not in ("vip", "nick"):
             return RelogResult(False, "modo_servidor_invalido")
         self._typed_nick = False
+        self._unknown_since = None
+        self._click_times = {}
         a = self.actions
         total_deadline = a.now() + cfg.get("total_timeout_sec", DEFAULTS["total_timeout_sec"])
         step_timeout = cfg.get("step_timeout_sec", DEFAULTS["step_timeout_sec"])
@@ -242,6 +318,8 @@ class Relogger:
             screen = classify(frame, cfg)
             if screen.kind != last_kind:
                 last_kind, step_deadline, self._typed_nick = screen.kind, now + step_timeout, False
+                if screen.kind != "unknown":
+                    self._unknown_since = None
             elif now >= step_deadline:
                 a.status(f"Reconexão automática: travou em '{screen.kind}'.")
                 return RelogResult(False, "timeout_etapa")
@@ -249,6 +327,15 @@ class Relogger:
             if result is not None:
                 return result
             a.sleep(POLL_SEC)
+
+    def _throttled_click(self, kind: str, x: int, y: int) -> None:
+        """Não clica de novo na mesma tela antes de CLICK_COOLDOWN_SEC (ver constante)."""
+        now = self.actions.now()
+        last = self._click_times.get(kind)
+        if last is not None and now - last < CLICK_COOLDOWN_SEC:
+            return
+        self._click_times[kind] = now
+        self.actions.click(x, y)
 
     def _step(self, screen: Screen, frame: np.ndarray) -> RelogResult | None:
         handlers = {
@@ -269,19 +356,19 @@ class Relogger:
             self.actions.status("Desconectado sem botão Reconnect: avisando.")
             return RelogResult(False, "sem_botao_reconnect", screen.error_code)
         self.actions.status("Desconectado: clicando em Reconnect.")
-        self.actions.click(*screen.reconnect_pos)
+        self._throttled_click("disconnected", *screen.reconnect_pos)
         return None
 
     def _on_main_menu(self, screen: Screen, frame: np.ndarray) -> None:
         if screen.play_pos:
             self.actions.status("Menu principal: clicando em PLAY.")
-            self.actions.click(*screen.play_pos)
+            self._throttled_click("main_menu", *screen.play_pos)
 
     def _on_server_select(self, screen: Screen, frame: np.ndarray) -> None:
         if screen.card_pos:
             map_name = self.cfg.get("map_name", DEFAULTS["map_name"])
             self.actions.status(f"Selecionando o servidor {map_name}.")
-            self.actions.click(*screen.card_pos)
+            self._throttled_click("server_select", *screen.card_pos)
 
     def _on_server_card(self, screen: Screen, frame: np.ndarray) -> None:
         if self.cfg.get("server_mode") == "vip":
@@ -295,6 +382,15 @@ class Relogger:
     def _on_unknown(self, screen: Screen, frame: np.ndarray) -> RelogResult | None:
         if self.actions.in_game(frame):
             self.actions.status("De volta ao jogo.")
+            return RelogResult(True, "ok")
+        # sem confirmação: se já não é nenhuma tela conhecida há tempo suficiente,
+        # considera que voltou (cobre chamar o relog com o jogo já normal)
+        now = self.actions.now()
+        if self._unknown_since is None:
+            self._unknown_since = now
+        settle = self.cfg.get("settle_sec", DEFAULTS["settle_sec"])
+        if now - self._unknown_since >= settle:
+            self.actions.status("De volta ao jogo (tela normal por tempo suficiente).")
             return RelogResult(True, "ok")
         return None
 

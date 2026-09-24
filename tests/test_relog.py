@@ -42,13 +42,36 @@ def test_disconnected_e_reconhecido_com_reconnect_leave_e_codigo(shot, name):
     assert 890 <= lx <= 970 and 605 <= ly <= 635
 
 
-def test_disconnected_em_resolucao_reduzida_o_ocr_nao_le_o_dialog(shot):
-    """Não força: nessa resolução o OCR do Windows não lê o texto do dialog (linhas=0).
-    Documentado no relatório final; a detecção funciona bem na resolução original."""
+@pytest.mark.parametrize("target_h", [720, 640])
+def test_disconnected_em_janela_pequena_ainda_acha_o_reconnect(shot, target_h):
+    """Na tela inteira o OCR não lê nada nessas resoluções; o recorte ampliado 4x
+    (classify) acha o título mesmo torto, e o Reconnect vem pelo fallback de cor
+    quando o texto do botão não é lido."""
     img = shot("relog_desconectado_idle_2.webp")
     h, w = img.shape[:2]
-    small = cv2.resize(img, (int(w * 720 / h), 720), interpolation=cv2.INTER_AREA)
-    assert classify(small).kind == "unknown"
+    scale = target_h / h
+    small = cv2.resize(img, (int(w * scale), target_h), interpolation=cv2.INTER_AREA)
+    screen = classify(small)
+    assert screen.kind == "disconnected"
+    rx, ry = screen.reconnect_pos
+    assert abs(rx - 1073 * scale) <= 40
+    assert abs(ry - 621 * scale) <= 40
+
+
+def test_botao_reconnect_por_cor_ignora_forma_que_nao_e_botao(monkeypatch):
+    """Sem OCR nenhum pro botão: um quadrado branco maior (não parece botão, aspecto
+    baixo) tem que perder pro retângulo branco fino de verdade (aspecto alto)."""
+    import numpy as np
+    from ocr import Line
+    frame = np.zeros((400, 400, 3), dtype="uint8")
+    frame[140:200, 150:210] = 255   # quadrado 60x60 (aspecto 1, área maior) — não é botão
+    frame[220:240, 140:220] = 255   # retângulo 80x20 (aspecto 4) — o botão de verdade
+    lines = [Line("Disconnected", 150, 130, 90, 12)]
+    monkeypatch.setattr(relog.ocr, "read_lines", lambda img, min_height=0: lines)
+    screen = classify(frame)
+    assert screen.kind == "disconnected"
+    cx, cy = screen.reconnect_pos
+    assert 170 <= cx <= 190 and 220 <= cy <= 240
 
 
 def test_disconnected_sem_botao_reconnect_fica_com_reconnect_pos_none(monkeypatch):
