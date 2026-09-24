@@ -94,6 +94,7 @@ class Fisher:
         self.bait_check_requested = False
         self._bait_retry_at = 0
         self._no_bait_warned = False
+        self._menu_stuck = False
         self.cfg = cfg
         self.cb = cb
         self.session = session
@@ -435,6 +436,8 @@ class Fisher:
             self.cb.bait(self.baits.summary(self.cfg["baits"]["infinite"]), self.baits.warning)
 
     def _maybe_check_baits(self) -> None:
+        if self._menu_stuck and not self._close_menu(bait_menu.BaitMenu(self)):
+            raise Recoverable("o menu do jogo continua aberto", self._safe_shot())
         if not self._baits_on() or self.cycles < self._bait_retry_at:
             return
         c = self.cfg["baits"]
@@ -465,13 +468,23 @@ class Fisher:
             logbook.save_evidence(self._safe_shot(), "iscas " + str(exc))
             self._bait_retry_at = self.cycles + BAIT_RETRY_CYCLES
         finally:
-            try:
-                menu.close()
-            except bait_menu.MenuError:
-                log.exception("Não consegui fechar o menu")
+            closed = self._close_menu(menu)
             if self.bait_path is not None:
                 self.baits.save(self.bait_path)
             self._report_bait()
+        if not closed:
+            raise Recoverable("o menu do jogo não fechou", self._safe_shot())
+
+    def _close_menu(self, menu) -> bool:
+        """Fecha o menu. Enquanto ele estiver aberto a pesca não aperta nenhuma tecla."""
+        try:
+            menu.close()
+        except bait_menu.MenuError as exc:
+            log.error("Não consegui fechar o menu: %s", exc)
+            self._menu_stuck = True
+            return False
+        self._menu_stuck = False
+        return True
 
     def _switch_bait_if_needed(self, menu, order: list[str], infinite: list[str], current: str | None) -> None:
         st = self.baits

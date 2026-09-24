@@ -1,11 +1,16 @@
 """Mexe no menu do jogo para conferir e trocar a isca.
 
-Caminho: M abre o menu → Inventory → aba Fishing → busca o nome da isca →
-lê a quantidade (e o selo "✓ Bait") → se for trocar, clica no quadrado e em
-"Equip Bait" → fecha com "Close".
+Caminho: M abre o menu → Inventory → aba Fishing → digita o nome da isca na
+busca + Enter → lê a quantidade (e o selo "✓ Bait") → se for trocar, clica no
+quadrado e em "Equip Bait" → limpa a busca e fecha no "Close".
 
-Segurança: só clica em textos lidos na tela que batem com o esperado, e nunca
-em "Back To Main Menu" / "Servers" (sairia do jogo ou trocaria de servidor).
+Segurança:
+- só clica em textos lidos na tela que batem com o esperado, e nunca em
+  "Back To Main Menu" / "Servers" (sairia do jogo ou trocaria de servidor);
+- confere cada passo (aba selecionada, busca filtrou, menu fechou); se algo não
+  bater, desiste da conferência em vez de ler errado;
+- com a caixa de busca ativa, qualquer tecla vira texto: por isso o menu precisa
+  estar fechado de verdade antes de a pesca voltar a apertar teclas.
 """
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ if TYPE_CHECKING:
 
 MENU_KEY = "m"
 SEARCH_RX = r"item name here"
-INVENTORY_RX = r"^\W*inventory$"
+INVENTORY_RX = r"\binventory$"   # o ícone ao lado às vezes vira uma letra ("O Inventory")
 FISHING_RX = r"^fishing\s*\("
 CLOSE_RX = r"close$"
 EQUIP_RX = r"equip\s*bait"
@@ -34,12 +39,14 @@ LEFT_MENU_MAX_X = 0.25          # "Inventory" e "Close" ficam na coluna da esque
 TABS_MAX_X = 0.45               # abas (All, Equipped, Fishing...) ficam antes da grade
 WAIT_MENU = 1.0
 WAIT_CLICK = 0.6
-WAIT_SEARCH = 0.9
+WAIT_SEARCH = 1.0
 CLEAR_KEYS = 30
+TAB_TRIES = 3
+CLOSE_TRIES = 3
 
 
 class MenuError(Exception):
-    """Não foi possível chegar na tela certa do menu."""
+    """Não foi possível chegar na tela certa do menu (ou sair dela)."""
 
 
 @dataclass(frozen=True)
@@ -72,42 +79,55 @@ class BaitMenu:
             return None
         return line
 
+    def _menu_open(self, lines, img) -> bool:
+        return (inventory.find_line(lines, SEARCH_RX) is not None
+                or self._find(lines, INVENTORY_RX, img, LEFT_MENU_MAX_X) is not None)
+
     # ------------------------------------------------------------ navegação
     def open(self) -> None:
         """Abre o menu e deixa em Inventory → Fishing. Lança MenuError se não conseguir."""
         screen.tap_key(MENU_KEY)
         self.f.sleep(WAIT_MENU)
-        for _ in range(2):
+        rect, img, lines = self._read()
+        inv = self._find(lines, INVENTORY_RX, img, LEFT_MENU_MAX_X)
+        if inv is None:
+            raise MenuError("o menu não abriu com a tecla M")
+        self._click(rect, inv)
+        for _ in range(TAB_TRIES):
             rect, img, lines = self._read()
-            inv = self._find(lines, INVENTORY_RX, img, LEFT_MENU_MAX_X)
-            if inv is not None:
-                self._click(rect, inv)
-                rect, img, lines = self._read()
             fishing = self._find(lines, FISHING_RX, img, TABS_MAX_X)
-            if fishing is not None:
-                self._click(rect, fishing)
-                rect, img, lines = self._read()
-            self.search_box = inventory.find_line(lines, SEARCH_RX)
-            if self.search_box is not None and fishing is not None:
+            if fishing is None:
+                raise MenuError("não achei a aba Fishing")
+            if inventory.is_active_tab(img, fishing):
+                self.search_box = inventory.find_line(lines, SEARCH_RX)
+                if self.search_box is None:
+                    raise MenuError("não achei a caixa de busca")
                 return
-        raise MenuError("não achei Inventory → Fishing no menu (a tecla M abriu o menu?)")
+            self._click(rect, fishing)
+        raise MenuError("a aba Fishing não ficou selecionada")
 
     def close(self) -> None:
-        if self.search_box is None:
-            _, _, lines = self._read()
-            if inventory.find_line(lines, SEARCH_RX) is None:
+        """Limpa a busca e fecha o menu, conferindo que fechou mesmo."""
+        if self.search_box is not None:
+            self._type_search("")
+        for attempt in range(CLOSE_TRIES):
+            rect, img, lines = self._read()
+            if not self._menu_open(lines, img):
+                self.search_box = None
                 return
-        self._clear_search()
+            close = self._find(lines, CLOSE_RX, img, LEFT_MENU_MAX_X)
+            if close is not None and attempt < CLOSE_TRIES - 1:
+                self._click(rect, close)
+            else:
+                screen.tap_key(MENU_KEY)
+                self.f.sleep(WAIT_MENU)
         rect, img, lines = self._read()
-        close = self._find(lines, CLOSE_RX, img, LEFT_MENU_MAX_X)
-        if close is not None:
-            self._click(rect, close)
-        else:
-            screen.tap_key(MENU_KEY)
-            self.f.sleep(WAIT_MENU)
+        if self._menu_open(lines, img):
+            raise MenuError("o menu não fechou")
         self.search_box = None
 
     def _type_search(self, text: str) -> None:
+        """Clica na busca, apaga, digita e aperta Enter (o jogo só filtra com Enter)."""
         rect, _ = self.f.frame()
         box = self.search_box
         screen.click_at(rect.x + box.x + box.w // 2, rect.y + box.y + box.h // 2)
@@ -116,17 +136,21 @@ class BaitMenu:
             screen.tap_key("backspace", hold_sec=0.01)
         if text:
             screen.type_text(text)
+        screen.tap_key("enter")  # também tira o foco da caixa de busca
         self.f.sleep(WAIT_SEARCH)
 
-    def _clear_search(self) -> None:
-        if self.search_box is not None:
-            self._type_search("")
+    def _search_one(self, name: str):
+        """Busca o nome e devolve (rect, img, quadrado ou None). Erro se a busca não filtrou."""
+        self._type_search(name)
+        rect, img = self.f.frame()
+        tiles = inventory.find_tiles(img, self.search_box)
+        if len(tiles) > 1:
+            raise MenuError(f"a busca por {name!r} não filtrou ({len(tiles)} itens na tela)")
+        return rect, img, (tiles[0] if tiles else None)
 
     # ------------------------------------------------------------ iscas
     def inspect(self, name: str) -> BaitInfo:
-        self._type_search(name)
-        _, img = self.f.frame()
-        box = inventory.find_single_tile(img, self.search_box)
+        _, img, box = self._search_one(name)
         if box is None:
             return BaitInfo(False, 0, False)
         tile = img[box.y:box.y + box.h, box.x:box.x + box.w]
@@ -134,9 +158,7 @@ class BaitMenu:
 
     def equip(self, name: str) -> bool:
         """Equipa a isca. Devolve True se o selo "✓ Bait" apareceu nela."""
-        self._type_search(name)
-        rect, img = self.f.frame()
-        box = inventory.find_single_tile(img, self.search_box)
+        rect, img, box = self._search_one(name)
         if box is None:
             return False
         cx, cy = box.center

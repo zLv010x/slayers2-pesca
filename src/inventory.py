@@ -22,6 +22,9 @@ OCR_SCALES = (4, 6, 3, 8)
 # Quadrado sozinho depois de buscar: fundo colorido, bem mais claro que o fundo do menu.
 TILE_MIN_BRIGHTNESS = 45
 TILE_MIN_SIDE_FRAC = 0.02          # lado mínimo do quadrado em fração da largura do jogo
+GRID_MAX_X = 0.74                  # a grade termina antes do painel de detalhes
+GRID_MAX_TILES = 12
+ACTIVE_TAB_MIN = 120               # medido: aba selecionada ~180, as outras ~25
 
 
 @dataclass(frozen=True)
@@ -120,26 +123,28 @@ def has_bait_badge(tile: np.ndarray) -> bool:
     return False
 
 
-def find_single_tile(frame: np.ndarray, search: ocr.Line) -> Box | None:
-    """Depois de buscar um nome, sobra (no máximo) um quadrado logo abaixo da busca."""
+def find_tiles(frame: np.ndarray, search: ocr.Line) -> list[Box]:
+    """Quadrados da primeira linha da grade (abaixo da caixa de busca), da esquerda para a direita."""
     fh, fw = frame.shape[:2]
     side = int(search.h * 4.5)
     x0 = max(0, search.x - side // 2)
     y0 = min(fh, search.y + search.h + search.h // 2)
-    region = frame[y0:min(fh, y0 + int(side * 1.6)), x0:min(fw, x0 + int(side * 2.2))]
+    x1 = min(int(GRID_MAX_X * fw), x0 + side * GRID_MAX_TILES)
+    region = frame[y0:min(fh, y0 + int(side * 1.6)), x0:x1]
     if region.size == 0:
-        return None
+        return []
     bright = (cv2.cvtColor(region, cv2.COLOR_BGR2GRAY) >= TILE_MIN_BRIGHTNESS).astype(np.uint8)
     bright = cv2.morphologyEx(bright, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
     n, _, stats, _ = cv2.connectedComponentsWithStats(bright)
     min_side = TILE_MIN_SIDE_FRAC * fw
-    best = None
-    for i in range(1, n):
-        x, y, w, h, area = stats[i]
-        if w >= min_side and h >= min_side and 0.7 <= w / h <= 1.4:
-            if best is None or area > best[4]:
-                best = (x, y, w, h, area)
-    if best is None:
-        return None
-    x, y, w, h, _ = best
-    return Box(x0 + x, y0 + y, w, h)
+    tiles = [Box(x0 + x, y0 + y, w, h) for x, y, w, h, _ in stats[1:]
+             if w >= min_side and h >= min_side and 0.7 <= w / h <= 1.4]
+    return sorted(tiles, key=lambda b: b.x)
+
+
+def is_active_tab(frame: np.ndarray, line: ocr.Line) -> bool:
+    """Aba selecionada tem fundo claro em volta do texto; as outras, fundo escuro."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    pad_x, pad_y = max(4, line.h // 2), max(3, line.h // 5)
+    around = gray[max(0, line.y - pad_y):line.y + line.h + pad_y, max(0, line.x - pad_x):line.x + line.w + pad_x]
+    return around.size > 0 and float(np.median(around)) >= ACTIVE_TAB_MIN
