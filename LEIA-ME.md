@@ -23,7 +23,14 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
 - Confere se a vara está na mão antes de lançar e só aperta a tecla da vara quando precisa.
 - Pausa se o Roblox sair da frente ou se a câmera girar, e volta quando estiver tudo certo.
 - Se algo der errado (vara não equipa, vários lançamentos sem peixe, erro inesperado), avisa no
-  Discord, espera e tenta de novo. Só desiste depois de várias falhas seguidas sem pegar nada.
+  Discord, espera e tenta de novo. Se desistir depois de várias falhas seguidas, **reinicia sozinha**
+  depois de 5 min (até 3 vezes por hora; muda em **Avançado**).
+- Se você mexer no mouse bem na hora do lançamento, ela espera o mouse ficar livre e lança de novo.
+- Se o jogo voltar para o **menu principal** (servidor reiniciou ou você caiu), ela para, avisa no
+  Discord e não fica tentando: entre de novo, volte ao ponto de pesca e aperte F1.
+- **Overlay** por cima do jogo com o tempo de macro, o total de cada peixe e item e as iscas gastas.
+  Fica em cima da party; com a pesca parada dá para arrastar. Liga/desliga e "Voltar para a party"
+  em **Configurar → Janela**. Ele não aparece nos prints da macro e, pescando, o clique passa através dele.
 - Registra tudo em `logs/macro.log` e salva um print em `logs/evidencias/` quando algo dá errado.
 - Não deixa o PC dormir nem a tela apagar enquanto está pescando.
 - Guarda tudo o que pegou em `logs/sessao-*.csv`.

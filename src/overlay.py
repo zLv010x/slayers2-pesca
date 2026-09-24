@@ -119,6 +119,8 @@ class Overlay(tk.Toplevel):
                  on_moved: Callable[[dict], None], zone: dict, pos: dict | None) -> None:
         super().__init__(master)
         self.withdraw()
+        self.title("Slayers 2 • Overlay")
+        self.protocol("WM_DELETE_WINDOW", lambda: None)  # só some pela opção na macro
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", ALPHA)
