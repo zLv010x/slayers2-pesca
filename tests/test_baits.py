@@ -60,6 +60,17 @@ def test_salva_e_carrega(tmp_path):
     assert BaitState.load(tmp_path / "nao_existe.json").checked is False
 
 
+def test_erro_ao_salvar_nao_derruba_a_pesca(tmp_path, monkeypatch):
+    """Disco travado (OneDrive/antivírus) não pode virar exceção: só loga e segue pescando."""
+    s = _state(fish=662, lure=None)
+
+    def boom(*a, **kw):
+        raise OSError("travado")
+
+    monkeypatch.setattr("pathlib.Path.mkdir", boom)
+    s.save(tmp_path / "iscas.json")  # não pode levantar
+
+
 def test_perto_do_fim_nao_fica_abrindo_o_menu_toda_hora():
     s = _state(fish=8)
     s.equipped = "Fish Head"

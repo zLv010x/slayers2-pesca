@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 import cv2
 import numpy as np
 
+import logbook
+
 WEBHOOK_RE = re.compile(r"^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$")
 USER_ID_RE = re.compile(r"^\d{15,21}$")
 
@@ -39,6 +41,11 @@ RARITY_LABELS = {
 MAX_RETRIES = 3
 TIMEOUT_SEC = 15
 USER_AGENT = "slayers2-pesca (webhook)"
+# Rodando a noite toda sem ninguém olhando: se o Discord ficar fora do ar por muito tempo,
+# a fila não pode crescer sem limite (some o mais antigo em vez de acumular para sempre).
+MAX_QUEUE = 200
+
+log = logbook.get()
 
 
 def valid_webhook(url: str) -> bool:
@@ -159,7 +166,7 @@ class DiscordNotifier:
         if report.image is not None:
             ok, buf = cv2.imencode(".png", report.image)
             png = buf.tobytes() if ok else None
-        self._queue.put((self.url, payload, png))
+        self._enqueue((self.url, payload, png))
 
     def send_text(self, text: str, ping: bool = False) -> None:
         if not self.enabled:
@@ -169,7 +176,17 @@ class DiscordNotifier:
             uid = self.user_id.strip()
             payload["content"] = f"<@{uid}> {text}"
             payload["allowed_mentions"] = {"users": [uid]}
-        self._queue.put((self.url, payload, None))
+        self._enqueue((self.url, payload, None))
+
+    def _enqueue(self, item: tuple) -> None:
+        """Poe na fila; se estiver cheia (Discord fora do ar por muito tempo), descarta o mais antigo."""
+        if self._queue.qsize() >= MAX_QUEUE:
+            try:
+                self._queue.get_nowait()
+                log.warning("Fila do Discord cheia (%d): descartando o aviso mais antigo.", MAX_QUEUE)
+            except queue.Empty:
+                pass
+        self._queue.put(item)
 
     def _worker(self) -> None:
         while True:
@@ -178,3 +195,6 @@ class DiscordNotifier:
                 post(url, payload, png)
             except RuntimeError as exc:
                 self._on_error(str(exc))
+            except Exception as exc:  # nunca pode matar a thread: a fila cresceria sem parar
+                log.exception("Erro inesperado ao enviar aviso para o Discord")
+                self._on_error(f"erro inesperado ({exc})")

@@ -51,6 +51,10 @@ DEFAULTS: dict = {
         "rod_retries": 3,
         "max_failed_casts": 5,
         "max_recoveries": 10,
+        # pesca rodando a noite toda sem ninguém olhando: se parar sozinha (não
+        # foi F1/botão/fechar), tenta de novo depois disso. 0 desliga.
+        "auto_restart_wait_min": 5,
+        "max_restarts_per_hour": 3,
     },
     "tracking": {
         "task_fps": 30.0,

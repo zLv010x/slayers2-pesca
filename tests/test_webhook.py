@@ -1,8 +1,12 @@
+import threading
+import time
 from datetime import datetime
 
-from webhook import LootReport, build_payload, valid_user_id, valid_webhook
+import webhook
+from webhook import DiscordNotifier, LootReport, build_payload, valid_user_id, valid_webhook
 
 UID = "123456789012345678"
+VALID_URL = "https://discord.com/api/webhooks/123/abc-DEF_9"
 
 
 def _report(rarity="rare", image=None):
@@ -45,3 +49,50 @@ def test_avisa_quando_e_novo_no_catalogo():
     r = LootReport("Coral", 1, "common", 1, 1, "", 0, "1m 00s", None, first_in_catalog=True)
     p = build_payload(r, "", {"mythic"}, datetime.now())
     assert "catálogo" in p["embeds"][0]["description"]
+
+
+def _wait_for(predicate, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_worker_sobrevive_a_erro_inesperado_e_continua_processando(monkeypatch):
+    """Um erro que não é RuntimeError (ex.: JSON inválido no 429) não pode matar a thread:
+    senão a fila cresce para sempre e nada mais é avisado no Discord a noite toda."""
+    calls = []
+
+    def fake_post(url, payload, png=None):
+        calls.append(payload)
+        if len(calls) == 1:
+            raise ValueError("corpo do 429 não é JSON válido")
+
+    monkeypatch.setattr(webhook, "post", fake_post)
+    n = DiscordNotifier()
+    n.url = VALID_URL
+    n.send_text("primeiro")
+    n.send_text("segundo")
+    assert _wait_for(lambda: len(calls) == 2)
+
+
+def test_on_error_e_avisado_do_erro_inesperado(monkeypatch):
+    monkeypatch.setattr(webhook, "post", lambda *a, **kw: (_ for _ in ()).throw(ValueError("boom")))
+    erros = []
+    n = DiscordNotifier(on_error=erros.append)
+    n.url = VALID_URL
+    n.send_text("oi")
+    assert _wait_for(lambda: bool(erros))
+
+
+def test_fila_descarta_o_mais_antigo_quando_enche(monkeypatch):
+    monkeypatch.setattr(threading.Thread, "start", lambda self: None)  # não deixa a thread consumir
+    n = DiscordNotifier()
+    n.url = VALID_URL
+    for i in range(webhook.MAX_QUEUE + 5):
+        n._enqueue((n.url, {"i": i}, None))
+    assert n._queue.qsize() == webhook.MAX_QUEUE
+    first = n._queue.get_nowait()
+    assert first[1]["i"] == 5  # os 5 mais antigos foram descartados

@@ -23,6 +23,7 @@ from catalog import Catalog
 from compass import CompassLock
 from cycle import Callbacks, Fisher
 from pickers import AreaPicker, PointPicker
+from restart_policy import RestartPolicy
 from session import Session
 from tabs import MUTED, RARITY_HEX, AdvancedTab, DiscordTab, SessionTab, SetupTab
 from webhook import DiscordNotifier
@@ -75,6 +76,8 @@ class App(ctk.CTk):
         self._picker_open = False
         self._minimized_by_run = False
         self._worker: threading.Thread | None = None
+        self._restart_policy = RestartPolicy()
+        self._restart_job: str | None = None
         self._snapshot = None  # mantém a imagem viva (senão o Tk apaga)
 
         self._build()
@@ -257,6 +260,7 @@ class App(ctk.CTk):
             self._stop.set()
             self.set_status("Parando...")
             return
+        self._cancel_auto_restart()
         if not self.cfg.get("cast_point"):
             self.set_status("Marque o ponto de lançamento antes de começar.")
             return
@@ -328,6 +332,41 @@ class App(ctk.CTk):
         self._render_running()
         self.set_status(reason)
         self._refresh_stats()
+        # F1/botão/fechar já marcam self._stop: só reinicia sozinho quando NÃO foi pedido.
+        if not self._stop.is_set():
+            self._schedule_auto_restart(reason)
+
+    def _cancel_auto_restart(self) -> None:
+        if self._restart_job is not None:
+            self.after_cancel(self._restart_job)
+            self._restart_job = None
+
+    def _notify_problem(self, text: str) -> None:
+        if self.cfg["discord"].get("notify_problems", True):
+            self.notifier.send_text(text, ping=True)
+
+    def _schedule_auto_restart(self, reason: str) -> None:
+        """A pesca parou sozinha (sem ninguém olhando): avisa e tenta de novo mais tarde."""
+        wait_min = float(self.cfg["limits"].get("auto_restart_wait_min", 0))
+        if wait_min <= 0:
+            return
+        limit = int(self.cfg["limits"].get("max_restarts_per_hour", 3))
+        if not self._restart_policy.allowed(limit):
+            self._notify_problem(
+                f"🛑 Pesca parou ({reason}) e já tentou reiniciar sozinha {limit}x na última hora: "
+                "vou esperar você dar uma olhada.")
+            return
+        self._notify_problem(f"⏸️ Pesca parou sozinha: {reason} Vou tentar de novo em {wait_min:.0f} min.")
+        self.set_status(f"{reason} Reiniciando sozinho em {wait_min:.0f} min...")
+        self._restart_job = self.after(int(wait_min * 60 * 1000), self._auto_restart)
+
+    def _auto_restart(self) -> None:
+        self._restart_job = None
+        if self._running:
+            return
+        self._restart_policy.record_restart()
+        self._notify_problem("🎣 Reiniciando a pesca sozinha.")
+        self.toggle_run()
 
     def _on_loot(self, items: list, snapshot) -> None:
         self._refresh_stats()
@@ -474,6 +513,7 @@ class App(ctk.CTk):
         self.set_status(f"Atalho salvo: {name}")
 
     def close(self) -> None:
+        self._cancel_auto_restart()
         self._stop.set()
         # espera a pesca soltar T/mouse (o finally dela) antes de fechar o programa
         if self._worker is not None and self._worker.is_alive():

@@ -185,6 +185,87 @@ def test_opcao_desligada_nao_mexe_na_vara(presses, monkeypatch, tmp_path):
     assert presses == [] and f.session.misses == 1
 
 
+def test_recoveries_nao_zera_antes_de_coletar_com_sucesso(monkeypatch):
+    """Se collect() falhar toda vez, o contador de recuperações não pode voltar a 0 antes disso
+    (senão a macro nunca desiste e fica presa recuperando a noite toda)."""
+    f = FakeFisher([])
+    f.recoveries = 3
+    monkeypatch.setattr(f, "_maybe_check_baits", lambda: None)
+    monkeypatch.setattr(f, "ensure_rod", lambda: None)
+    monkeypatch.setattr(f, "check_camera", lambda: None)
+    monkeypatch.setattr(f, "cast", lambda: None)
+    monkeypatch.setattr(f, "minigame", lambda: True)
+
+    def boom():
+        raise RuntimeError("falha ao coletar")
+
+    monkeypatch.setattr(f, "collect", boom)
+    with pytest.raises(RuntimeError):
+        f.one_cycle()
+    assert f.recoveries == 3
+
+
+def test_recoveries_zera_so_depois_do_ciclo_inteiro_dar_certo(monkeypatch):
+    f = FakeFisher([])
+    f.recoveries = 3
+    monkeypatch.setattr(f, "_maybe_check_baits", lambda: None)
+    monkeypatch.setattr(f, "ensure_rod", lambda: None)
+    monkeypatch.setattr(f, "check_camera", lambda: None)
+    monkeypatch.setattr(f, "cast", lambda: None)
+    monkeypatch.setattr(f, "minigame", lambda: True)
+    monkeypatch.setattr(f, "collect", lambda: [])
+    f.one_cycle()
+    assert f.recoveries == 0
+
+
+def test_roblox_nao_encontrado_avisa_no_discord_depois_de_esperar(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    f = FakeFisher([])
+    f.notifier = FakeNotifier()
+    f.cfg["timings"]["recovery_wait_sec"] = 5.0
+    f.cfg["discord"]["notify_problems"] = True
+    calls = {"n": 0}
+
+    def find_roblox():
+        calls["n"] += 1
+        if calls["n"] > 15:  # 15 * FOREGROUND_POLL_SEC (0,5s) = 7,5s virtuais > recovery_wait_sec
+            f._stop.set()
+        return None
+
+    monkeypatch.setattr(cycle.window, "find_roblox", find_roblox)
+    with pytest.raises(cycle.StopRun):
+        f.rect()
+    avisos = [t for t, _ in f.notifier.sent]
+    assert any("Roblox não encontrado" in t for t in avisos)
+
+
+def test_roblox_fora_da_frente_avisa_no_discord_uma_vez(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
+    f = FakeFisher([])
+    f.notifier = FakeNotifier()
+    f.hwnd = 1
+    f.cfg["timings"]["recovery_wait_sec"] = 5.0
+    f.cfg["timings"]["refocus_after_sec"] = 0  # não tenta focar sozinho neste teste
+    f.cfg["discord"]["notify_problems"] = True
+    monkeypatch.setattr(cycle.window, "client_rect", lambda hwnd: cycle.window.Rect(0, 0, 100, 100))
+    calls = {"n": 0}
+
+    def is_foreground(hwnd):
+        calls["n"] += 1
+        if calls["n"] > 15:
+            f._stop.set()
+        return False
+
+    monkeypatch.setattr(cycle.window, "is_foreground", is_foreground)
+    with pytest.raises(cycle.StopRun):
+        f.rect()
+    avisos = [t for t, _ in f.notifier.sent if "não está na frente" in t]
+    assert len(avisos) == 1  # só avisa uma vez por pausa
+
+
 class FakeMenu:
     """Menu do jogo de mentira: inventário definido pelo teste."""
 

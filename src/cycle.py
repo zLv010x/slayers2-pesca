@@ -141,29 +141,40 @@ class Fisher:
 
     def rect(self) -> window.Rect:
         """Área do jogo agora. Espera (pausado) enquanto o Roblox não estiver na frente."""
-        warned, since = False, 0.0
+        warned, paused_since, last_refocus, notified = False, 0.0, 0.0, False
+        missing_since, missing_notified = None, False
         while True:
             self._check_stop()
             if not self.hwnd or window.client_rect(self.hwnd) is None:
                 self.hwnd = window.find_roblox()
             if self.hwnd is None:
                 self.cb.status("Roblox não encontrado. Abra o jogo.")
+                if missing_since is None:
+                    missing_since = time.perf_counter()
+                elif not missing_notified and time.perf_counter() - missing_since >= self.t("recovery_wait_sec"):
+                    self._notify("⏸️ Pesca pausada: Roblox não encontrado. Abra o jogo para continuar.")
+                    missing_notified = True
             elif window.is_foreground(self.hwnd):
+                missing_since, missing_notified = None, False
                 r = window.client_rect(self.hwnd)
                 if r is not None:
                     if warned:
                         self.cb.status("Roblox de volta, continuando...")
                     return r
             else:
+                missing_since, missing_notified = None, False
                 if not warned:
                     self.mouse.release()
                     self.cb.status("Pausado: o Roblox não está na frente. Clique no jogo para continuar.")
-                    warned, since = True, time.perf_counter()
+                    warned, paused_since, last_refocus = True, time.perf_counter(), time.perf_counter()
+                elif not notified and time.perf_counter() - paused_since >= self.t("recovery_wait_sec"):
+                    self._notify("⏸️ Pesca pausada: o Roblox não está na frente. Clique no jogo para continuar.")
+                    notified = True
                 refocus = self.t("refocus_after_sec")
-                if refocus > 0 and time.perf_counter() - since >= refocus:
+                if refocus > 0 and time.perf_counter() - last_refocus >= refocus:
                     log.warning("Roblox fora da frente há %.0fs: trazendo de volta.", refocus)
                     window.focus(self.hwnd)
-                    since = time.perf_counter()
+                    last_refocus = time.perf_counter()
             time.sleep(FOREGROUND_POLL_SEC)
 
     def frame(self) -> tuple[window.Rect, np.ndarray]:
@@ -541,7 +552,6 @@ class Fisher:
                 raise Recoverable(f"{limit} lançamentos seguidos sem minigame (caiu na água? vara presa?)", img)
             return
         self.failed_casts = 0
-        self.recoveries = 0
         self.collect()
         if self._baits_on():
             # o jogo gasta 1 isca a cada mordida resolvida (pegando ou não)
@@ -551,6 +561,9 @@ class Fisher:
             self._report_bait()
         if self.cycles % STATS_EVERY_CYCLES == 0:
             self._log_stats()
+        # só zera depois que o ciclo inteiro deu certo (senão um erro sempre no mesmo lugar
+        # nunca deixa o contador passar de 1 e a macro nunca desiste de verdade)
+        self.recoveries = 0
 
     def _log_stats(self) -> None:
         s = self.session
