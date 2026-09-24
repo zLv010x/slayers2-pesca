@@ -341,13 +341,16 @@ class Fisher:
                 prompt_on = seen_any and not lost
                 blind = not seen_any and now - start >= PROMPT_GRACE_SEC
                 want = prompt_on or blind
-                if holding and (not want or now - hold_since > hold_need + HOLD_SLACK_SEC):
-                    # aviso sumiu (jogo zerou o progresso) ou segurou tempo demais sem vir nada
+                held = now - hold_since
+                # Depois de apertar, segura pelo menos o tempo que o jogo pede: com a câmera longe o
+                # aviso vira um losango pequeno que o detector perde, mas ele continua na tela.
+                # Só então solta se o aviso sumiu (item balançou) ou se passou do tempo sem vir nada.
+                if holding and ((not want and held >= hold_need) or held > hold_need + HOLD_SLACK_SEC):
                     screen.release_key("t")
                     holding = False
                     restarts += 1
                     log.debug("T solto %s (aviso na tela=%s, segurando há %.1fs)",
-                              where, prompt_on, now - hold_since)
+                              where, prompt_on, held)
                 elif want and not holding:
                     screen.press_key("t")
                     holding, hold_since = True, now

@@ -268,3 +268,57 @@ def test_menu_com_erro_nao_derruba_a_pesca(bait_env):
     f, menu = bait_env({}, fail=True)
     f.check_baits()
     assert menu.closed and f._bait_retry_at > f.cycles
+
+
+@pytest.fixture
+def game_env(monkeypatch):
+    """Coleta imitando a regra do jogo: o item só vem com T apertado sem parar por GAME_HOLD
+    segundos com o aviso visível; se o aviso some, o progresso zera e só volta apertando de novo."""
+    from loot import Loot
+    GAME_HOLD = 2.3
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    st = {"press_at": None, "broken": False, "got": False, "presses": 0}
+    env = {"visible": lambda t: True, "detected": lambda t, holding: True, "st": st}
+
+    def press(k):
+        st["presses"] += 1
+        st["press_at"], st["broken"] = clock.now, not env["visible"](clock.now)
+
+    def release(k):
+        st["press_at"] = None
+
+    def read_popups(img):
+        t = clock.now
+        if st["press_at"] is not None:
+            if not env["visible"](t):
+                st["broken"] = True
+            elif not st["broken"] and t - st["press_at"] >= GAME_HOLD:
+                st["got"] = True
+        return [Loot("Clown Fish", 1, "rare", (0, 0, 1, 1))] if st["got"] else []
+
+    monkeypatch.setattr(cycle.screen, "press_key", press)
+    monkeypatch.setattr(cycle.screen, "release_key", release)
+    monkeypatch.setattr(cycle.loot_mod, "read_popups", read_popups)
+    monkeypatch.setattr(cycle.prompt_mod, "find_collect_prompt",
+                        lambda img: object() if env["detected"](clock.now, st["press_at"] is not None) else None)
+    f = FakeFisher([])
+    f.frame = lambda: (None, None)
+    return f, env
+
+
+def test_detector_falha_com_t_apertado_mas_item_vem(game_env):
+    # bug real: com a câmera longe, o aviso vira um losango pequeno que o detector não acha
+    # enquanto o T está apertado; o aviso continua na tela e o jogo precisa do T sem parar
+    f, env = game_env
+    env["detected"] = lambda t, holding: not holding
+    fresh, _ = f._hold_t([], 12.0, "da vara")
+    assert [i.name for i in fresh] == ["Clown Fish"]
+
+
+def test_item_balanca_de_verdade_e_ainda_assim_vem(game_env):
+    f, env = game_env
+    env["visible"] = lambda t: not (1.0 <= t < 1.6)   # o aviso some de verdade por 0,6 s
+    env["detected"] = lambda t, holding: env["visible"](t)
+    fresh, _ = f._hold_t([], 12.0, "da vara")
+    assert fresh and env["st"]["presses"] >= 2       # precisou apertar de novo depois que voltou
