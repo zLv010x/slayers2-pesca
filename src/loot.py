@@ -2,7 +2,7 @@
 
 A raridade vem da cor da faixa atrás do nome, as mesmas cores do inventário:
 azul = rare, roxo = epic, dourado = legendary, vermelho = mythic.
-Cinza (ou nenhuma cor clara) = common.
+Cinza (ou nenhuma cor clara) = common. Ver popup_rarity.
 """
 from __future__ import annotations
 
@@ -45,20 +45,31 @@ NEW_MIN_SAT = 150
 NEW_MIN_VAL = 170
 NEW_MIN_FRAC = 0.12
 
-# Faixa de pixels acima/abaixo do nome onde a cor da raridade aparece.
-BAND_PAD = 8
-MIN_SAT = 55
-MIN_VAL = 60
-# Faixa colorida de verdade dá 30%+ de pixels da cor; o brilho bege das comuns dá ~8%.
-MIN_COLOR_FRAC = 0.15
-# Matizes do OpenCV (0-179), medidas no inventário: azul ~101, roxo ~150,
-# dourado ~22, vermelho ~1.
-HUE_RANGES = (
-    ("epic", ((138, 165),)),
-    ("mythic", ((0, 8), (170, 179))),
-    ("legendary", ((12, 35),)),
-    ("rare", ((95, 130),)),
+# Cores das raridades: (raridade, faixas de matiz do OpenCV 0-179, S mínima, V mínima).
+# Medido nas bordas dos avisos: azul H 103-112, dourado H 17-22 com S 86-180, vermelho
+# H 0-5; roxo ~150 (inventário). Ficam de fora a madeira do píer (H 10-13, virava
+# "legendary"), a madeira à noite (V ~20) e as bordas bege das comuns (S ~45).
+RARITY_COLORS = (
+    ("epic", ((135, 165),), 45, 40),
+    ("mythic", ((0, 5), (172, 179)), 90, 35),
+    ("legendary", ((15, 30),), 75, 55),
+    ("rare", ((100, 118),), 45, 40),
 )
+# Pedaço liso (fundo do quadrado no inventário): precisa de 15%+ de pixels da cor.
+MIN_COLOR_FRAC = 0.15
+
+# A faixa do aviso tem duas bordas finas (1-2 px) na cor da raridade, uma acima e outra
+# abaixo do nome (~0,65 e ~1,75 altura de letra do topo do nome). O miolo é quase
+# transparente: a madeira/água/pedra do fundo aparece nele e enganava a média da faixa.
+# "Borda" = fileira com bem mais pixels da cor do que as fileiras EDGE_GAP_PX acima e
+# abaixo; fundo liso não forma borda, e a borda continua visível com o aviso apagando.
+EDGE_SEARCH_UP = 1.2     # alturas de letra acima do topo da caixa do OCR (caixa às vezes desloca)
+EDGE_SEARCH_DOWN = 2.7   # alturas de letra abaixo do topo da caixa
+EDGE_GAP_PX = 3
+EDGE_SEGMENTS = 3        # a cor some da esquerda para a direita: mede cada terço do nome
+EDGE_MIN = 0.4           # fração de pixels da cor acima das fileiras vizinhas
+EDGE_ALONE_MIN = 0.7     # borda sem par (a outra sumiu) precisa ser forte: riscos do cenário dão 0,4-0,7
+EDGE_PAIR_SPAN = (1.0, 3.0)  # distância entre as duas bordas, em alturas de letra (medido ~2,1-2,4)
 
 
 @dataclass(frozen=True)
@@ -80,34 +91,94 @@ def _parse_qty(text: str) -> int | None:
         return None
 
 
-def classify_rarity(band_bgr: np.ndarray) -> str:
-    """Decide a raridade pela cor dominante dos pixels coloridos da faixa."""
-    hsv = cv2.cvtColor(band_bgr, cv2.COLOR_BGR2HSV)
+def _color_masks(hsv: np.ndarray) -> dict[str, np.ndarray]:
+    """Para cada raridade, os pixels que têm a cor dela."""
     hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    colored = (sat >= MIN_SAT) & (val >= MIN_VAL)
-    total = colored.size
-    best, best_frac = "common", MIN_COLOR_FRAC
-    for rarity, ranges in HUE_RANGES:
-        in_range = np.zeros_like(colored)
+    masks = {}
+    for rarity, ranges, min_sat, min_val in RARITY_COLORS:
+        in_range = np.zeros(hue.shape, bool)
         for lo, hi in ranges:
             in_range |= (hue >= lo) & (hue <= hi)
-        frac = float((colored & in_range).sum()) / max(total, 1)
+        masks[rarity] = in_range & (sat >= min_sat) & (val >= min_val)
+    return masks
+
+
+def classify_rarity(patch_bgr: np.ndarray) -> str:
+    """Raridade pela cor dominante de um pedaço liso (ex.: fundo do quadrado no inventário)."""
+    best, best_frac = "common", MIN_COLOR_FRAC
+    for rarity, mask in _color_masks(cv2.cvtColor(patch_bgr, cv2.COLOR_BGR2HSV)).items():
+        frac = float(mask.mean())
         if frac > best_frac:
             best, best_frac = rarity, frac
     return best
 
 
-def _band(frame: np.ndarray, x: int, y: int, w: int, h: int, top_only: bool = False) -> np.ndarray:
-    """Recorta a faixa colorida acima e abaixo do texto, sem o ícone à esquerda."""
+def _edge_strength(mask: np.ndarray) -> np.ndarray:
+    """Por fileira: quanto ela tem a mais da cor que as fileiras EDGE_GAP_PX acima e abaixo.
+
+    Mede cada terço da largura e fica com o melhor (a borda vai sumindo para a direita).
+    """
+    gap = EDGE_GAP_PX
+    strength = np.zeros(mask.shape[0])
+    if mask.shape[0] <= 2 * gap:
+        return strength
+    for part in np.array_split(mask, EDGE_SEGMENTS, axis=1):
+        if part.shape[1] == 0:
+            continue
+        frac = part.mean(axis=1)
+        above_below = np.maximum(frac[:-2 * gap], frac[2 * gap:])
+        strength[gap:-gap] = np.maximum(strength[gap:-gap], frac[gap:-gap] - above_below)
+    return strength
+
+
+def _edge_score(strength: np.ndarray, h: int, alone_ok: bool) -> float:
+    """Força da borda da faixa: a das duas bordas (cima e baixo) ou uma sozinha bem forte.
+
+    alone_ok: com o selo NEW! a borda de baixo fica escondida, então basta uma.
+    """
+    rows = np.flatnonzero(strength >= EDGE_MIN)
+    if rows.size == 0:
+        return 0.0
+    lo, hi = EDGE_PAIR_SPAN[0] * h, EDGE_PAIR_SPAN[1] * h
+    pair = 0.0
+    for r in rows:
+        partners = rows[(rows - r >= lo) & (rows - r <= hi)]
+        if partners.size:
+            pair = max(pair, min(strength[r], strength[partners].max()))
+    strongest = float(strength.max())
+    alone = strongest if alone_ok or strongest >= EDGE_ALONE_MIN else 0.0
+    return max(pair, alone)
+
+
+def _badge_mask(hsv: np.ndarray, h: int) -> np.ndarray:
+    """Pixels do selo amarelo "NEW!" (com uma margem): ele não pode contar como dourado."""
+    hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    badge = ((hue >= NEW_HUE[0]) & (hue <= NEW_HUE[1]) & (sat >= NEW_MIN_SAT)
+             & (val >= NEW_MIN_VAL)).astype(np.uint8)
+    size = 2 * max(2, h // 6) + 1
+    return cv2.dilate(badge, np.ones((size, size), np.uint8)).astype(bool)
+
+
+def popup_rarity(frame: np.ndarray, box: tuple[int, int, int, int], is_new: bool = False) -> str:
+    """Raridade do aviso pelas bordas finas coloridas da faixa atrás do nome.
+
+    box = caixa do nome dada pelo OCR. A busca vai de EDGE_SEARCH_UP alturas acima até
+    EDGE_SEARCH_DOWN abaixo do topo dela: a caixa às vezes vem deslocada ou com o ícone junto.
+    """
+    x, y, w, h = box
     fh, fw = frame.shape[:2]
     x0, x1 = max(0, x), min(fw, x + w)
-    top = frame[max(0, y - BAND_PAD):max(0, y - 2), x0:x1]
-    bottom = frame[min(fh, y + h + 2):min(fh, y + h + BAND_PAD), x0:x1]
-    # Com o selo NEW! embaixo, só a parte de cima mostra a cor da raridade.
-    parts = [p for p in ((top,) if top_only else (top, bottom)) if p.size]
-    if not parts:
-        return frame[max(0, y):min(fh, y + h), x0:x1]
-    return np.vstack(parts)
+    y0, y1 = max(0, y - int(EDGE_SEARCH_UP * h)), min(fh, y + int(EDGE_SEARCH_DOWN * h))
+    if h <= 0 or x1 - x0 < EDGE_SEGMENTS or y1 - y0 <= 2 * EDGE_GAP_PX:
+        return "common"
+    hsv = cv2.cvtColor(frame[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
+    keep = ~_badge_mask(hsv, h) if is_new else np.ones(hsv.shape[:2], bool)
+    best, best_score = "common", 0.0
+    for rarity, mask in _color_masks(hsv).items():
+        score = _edge_score(_edge_strength(mask & keep), h, alone_ok=is_new)
+        if score > best_score:
+            best, best_score = rarity, score
+    return best
 
 
 def _read_quantity(frame: np.ndarray, x: int, y: int, w: int, h: int) -> int | None:
@@ -225,7 +296,7 @@ def _read_popups_once(frame: np.ndarray, threshold: int | None, upscale: int) ->
             qty = _read_quantity(frame, x, y, line.w, line.h)
         if qty is None:
             continue
-        rarity = classify_rarity(_band(frame, x, y, line.w, line.h, top_only=is_new))
+        rarity = popup_rarity(frame, (x, y, line.w, line.h), is_new)
         found.append(Loot(name, qty, rarity, (x, y, line.w, line.h), is_new))
     return found
 

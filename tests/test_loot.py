@@ -127,6 +127,108 @@ def test_aviso_pequeno_em_janela_1002(shot):
     assert loot is not None and (loot.name, loot.quantity) == ("Zebra Fish", 1)
 
 
+# --- raridade pelas bordas coloridas da faixa ------------------------------------
+# Recortes reais do catálogo (item_snapshot da 1ª vez que o item apareceu). O recorte vai de
+# 3h à esquerda até h à direita do nome e de h acima até 3h abaixo, então a caixa do OCR
+# gravada é (3h, h, w, h) com h = altura/4. Todos eram lidos errado pelo método antigo.
+
+def _caixa_do_recorte(img):
+    h = img.shape[0] // 4
+    return 3 * h, h, img.shape[1] - 4 * h, h
+
+
+def _raridade_do_recorte(shot, name):
+    import loot
+    img = shot(name)
+    box = _caixa_do_recorte(img)
+    return loot.popup_rarity(img, box, is_new=loot.has_new_badge(img, *box))
+
+
+@pytest.mark.parametrize("name, expected", [
+    # madeira do píer (H 10-13, S ~110) atrás da faixa contava como "dourado"
+    ("aviso_rare_madeira_zebra_fish.png", "rare"),
+    ("aviso_rare_madeira_refinement_ore.png", "rare"),
+    ("aviso_common_madeira_ouwfish.png", "common"),
+    # caixa do OCR com o ícone dourado junto ("v?Ore") e deslocada 12 px do nome
+    ("aviso_mythic_ore_caixa_com_icone.png", "mythic"),
+    # Lost Cape com selo NEW! à noite: faixa vermelha escura, caixa 19 px acima do nome
+    ("aviso_mythic_lost_cape_new_noite.png", "mythic"),
+    # aviso ainda surgindo (meio transparente): a média da faixa não chega a 15% de cor
+    ("aviso_rare_apagando_noite_clown_fish.png", "rare"),
+    ("aviso_rare_apagando_pedra_clown_fish.png", "rare"),
+])
+def test_raridade_certa_nos_avisos_que_eram_lidos_errado(shot, name, expected):
+    assert _raridade_do_recorte(shot, name) == expected
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("aviso_legendary_krathulon.png", "legendary"),
+    ("aviso_mythic_lost_cape.png", "mythic"),
+    ("aviso_common_noite_metal_scraps.png", "common"),
+    ("aviso_common_pedra_sea_horse.png", "common"),
+])
+def test_raridade_que_ja_era_certa_continua_certa(shot, name, expected):
+    assert _raridade_do_recorte(shot, name) == expected
+
+
+@pytest.mark.parametrize("dy", [-4, 0, 4])
+def test_raridade_aguenta_caixa_do_ocr_um_pouco_deslocada(shot, dy):
+    import loot
+    frame = shot("popup_golden_fish.webp")
+    x, y, w, h = read_popup(frame).box
+    assert loot.popup_rarity(frame, (x, y + dy, w, h)) == "rare"
+
+
+def _fundo_com_nome(fundo_bgr):
+    img = np.full((120, 300, 3), fundo_bgr, np.uint8)
+    img[50:62, 60:240] = 235  # "nome" branco
+    return img, (60, 50, 180, 12)
+
+
+@pytest.mark.parametrize("fundo", [
+    (140, 90, 30),   # água/céu azul (fazia o Ewerton ler "rare" em item comum)
+    (35, 47, 63),    # madeira do píer (virava "legendary")
+    (30, 30, 160),   # vermelho liso
+])
+def test_fundo_liso_colorido_nao_e_raridade(fundo):
+    import loot
+    img, box = _fundo_com_nome(fundo)
+    assert loot.popup_rarity(img, box) == "common"
+
+
+def _linha_tracejada(img, y, x0, x1, bgr, cheio=0.55):
+    """Linha de 2 px que cobre só 'cheio' de cada trecho (borda fraca/apagando)."""
+    passo = 10
+    for x in range(x0, x1, passo):
+        img[y:y + 2, x:x + int(passo * cheio)] = bgr
+
+
+def test_duas_bordas_fracas_em_volta_do_nome_dao_a_cor():
+    import loot
+    img, (x, y, w, h) = _fundo_com_nome((90, 90, 90))
+    _linha_tracejada(img, y - 8, x, x + w, (200, 120, 40))
+    _linha_tracejada(img, y + h + 9, x, x + w, (200, 120, 40))
+    assert loot.popup_rarity(img, (x, y, w, h)) == "rare"
+
+
+def test_um_risco_fraco_solto_no_fundo_nao_da_cor():
+    # borda fraca sozinha (sem a de baixo) é mais provável ser um risco do cenário
+    import loot
+    img, (x, y, w, h) = _fundo_com_nome((90, 90, 90))
+    _linha_tracejada(img, y - 8, x, x + w, (200, 120, 40))
+    assert loot.popup_rarity(img, (x, y, w, h)) == "common"
+
+
+def test_selo_new_amarelo_nao_vira_legendary_em_item_comum(shot):
+    import cv2
+    import loot
+    frame = shot("popup_coral.webp").copy()
+    x, y, w, h = read_popup(frame).box
+    cv2.rectangle(frame, (x, y + h + 3), (x + w, y + 2 * h + 5), (20, 200, 250), -1)
+    assert loot.has_new_badge(frame, x, y, w, h)
+    assert loot.popup_rarity(frame, (x, y, w, h), is_new=True) == "common"
+
+
 def test_nome_sem_letras_suficientes_e_lixo():
     # 24/09 02:28: no menu principal, o "6d" do painel de códigos virou um "item"
     import loot
