@@ -151,3 +151,11 @@ def test_cursor_piscando_nao_atrapalha_a_conferencia():
     assert search_matches("Fish Head", "fish head")
     assert not search_matches("WormFish Head", "Fish Head")
     assert not search_matches("Fish", "Fish Head")
+
+
+def test_aba_selecionada_em_janela_1920x991(shot):
+    # print real do Inside: a aba Fishing estava selecionada, mas o brilho dá só ~110
+    img = shot("menu_1920x991_fishing.webp")
+    lines = ocr.read_lines(img)
+    assert is_active_tab(img, find_line(lines, r"^fishing\s*\("))
+    assert not is_active_tab(img, find_line(lines, r"^face\s*\("))

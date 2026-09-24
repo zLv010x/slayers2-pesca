@@ -251,6 +251,9 @@ class App(ctk.CTk):
         self._stop = threading.Event()
         self._running = True
         self.session.start()
+        # a macro não pode se ver no print quando a janela dela fica por cima do jogo
+        if not window.set_capture_excluded(self, True):
+            logbook.get().warning("Não deu para esconder a janela da macro dos prints (Windows antigo?)")
         self._render_running()
         cb = Callbacks(status=lambda m: self.post(lambda: self.set_status(m)),
                        loot=lambda items, snap: self.post(lambda: self._on_loot(items, snap)),
@@ -307,6 +310,7 @@ class App(ctk.CTk):
             self._minimized_by_run = False
             self._restore_window()
         self.session.pause()
+        window.set_capture_excluded(self, False)
         self._render_running()
         self.set_status(reason)
         self._refresh_stats()

@@ -20,6 +20,9 @@ ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 ES_DISPLAY_REQUIRED = 0x00000002
 MIN_CLIENT_PX = 200
+GA_ROOT = 2
+WDA_NONE = 0x0
+WDA_EXCLUDEFROMCAPTURE = 0x11
 
 _EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -82,6 +85,16 @@ def client_rect(hwnd: int) -> Rect | None:
     if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
         return None
     return Rect(pt.x, pt.y, w, h)
+
+
+def set_capture_excluded(tk_widget, on: bool) -> bool:
+    """Deixa a janela da macro invisível para prints de tela (a macro não se vê por cima
+    do Roblox). Precisa do Windows 10 2004+; devolve False se não deu."""
+    try:
+        hwnd = user32.GetAncestor(tk_widget.winfo_id(), GA_ROOT)
+        return bool(user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE if on else WDA_NONE))
+    except (OSError, AttributeError):
+        return False
 
 
 def keep_awake(on: bool) -> None:
