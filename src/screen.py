@@ -16,8 +16,16 @@ user32 = ctypes.windll.user32
 INPUT_MOUSE = 0
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
-# O Roblox só "vê" o cursor depois de um pequeno movimento real.
-NUDGE_SEC = 0.02
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
+SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
+SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
+# O Roblox só "vê" o cursor depois de um movimento de mouse de verdade.
+NUDGE_PX = 3
+MOVE_TRIES = 3
+MOVE_TOLERANCE_PX = 2
+NUDGE_SEC = 0.03
 SETTLE_SEC = 0.05
 CLICK_HOLD_SEC = 0.05
 TYPE_DELAY_SEC = 0.04
@@ -38,10 +46,25 @@ class _INPUT(ctypes.Structure):
     _fields_ = (("type", wintypes.DWORD), ("u", _U))
 
 
-def _mouse(flags: int) -> None:
+def _mouse(flags: int, dx: int = 0, dy: int = 0) -> None:
     inp = _INPUT(type=INPUT_MOUSE)
-    inp.mi = _MOUSEINPUT(0, 0, 0, flags, 0, None)
+    inp.mi = _MOUSEINPUT(int(dx), int(dy), 0, flags, 0, None)
     user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+
+
+def cursor_pos() -> tuple[int, int]:
+    pt = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y
+
+
+def _move_event(x: int, y: int) -> None:
+    """Movimento "de verdade" (como um mouse físico) até (x, y) na área de trabalho inteira."""
+    vx, vy = user32.GetSystemMetrics(SM_XVIRTUALSCREEN), user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+    vw, vh = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN), user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+    nx = round((x - vx) * 65535 / max(1, vw - 1))
+    ny = round((y - vy) * 65535 / max(1, vh - 1))
+    _mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, nx, ny)
 
 
 class Grabber:
@@ -58,18 +81,35 @@ class Grabber:
         self._sct.close()
 
 
-def move_to(x: int, y: int) -> None:
-    user32.SetCursorPos(int(x) + 1, int(y) + 1)
-    time.sleep(NUDGE_SEC)
-    user32.SetCursorPos(int(x), int(y))
-    time.sleep(SETTLE_SEC)
+def move_to(x: int, y: int) -> bool:
+    """Leva o cursor até (x, y) e confere que chegou. Devolve False se não chegou.
+
+    O Roblox não percebe o cursor "teletransportado" (SetCursorPos): ele usa a última
+    posição de um movimento de mouse de verdade. Por isso mandamos eventos de movimento
+    (passando por um ponto do lado, para o jogo ver o mouse andar) e conferimos a posição.
+    """
+    x, y = int(x), int(y)
+    for _ in range(MOVE_TRIES):
+        _move_event(x + NUDGE_PX, y + NUDGE_PX)
+        time.sleep(NUDGE_SEC)
+        _move_event(x, y)
+        time.sleep(SETTLE_SEC)
+        cx, cy = cursor_pos()
+        if abs(cx - x) <= MOVE_TOLERANCE_PX and abs(cy - y) <= MOVE_TOLERANCE_PX:
+            return True
+        user32.SetCursorPos(x, y)  # último recurso antes de tentar os eventos de novo
+        time.sleep(NUDGE_SEC)
+    return False
 
 
-def click_at(x: int, y: int) -> None:
-    move_to(x, y)
+def click_at(x: int, y: int) -> bool:
+    """Clica em (x, y). Não clica (e devolve False) se o cursor não chegou lá."""
+    if not move_to(x, y):
+        return False
     _mouse(MOUSEEVENTF_LEFTDOWN)
     time.sleep(CLICK_HOLD_SEC)
     _mouse(MOUSEEVENTF_LEFTUP)
+    return True
 
 
 class MouseButton:

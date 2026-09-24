@@ -219,7 +219,8 @@ class Fisher:
         x, y = self.to_screen(r, pt["x"], pt["y"])
         self.cb.status("Lançando...")
         log.debug("Clique de lançamento em (%d, %d) na janela %dx%d", x, y, r.w, r.h)
-        screen.click_at(x, y)
+        if not screen.click_at(x, y):
+            raise Recoverable(f"o mouse não chegou no ponto de lançamento ({x}, {y})", self._safe_shot())
         self.sleep(self.t("after_cast_sec"))
 
     def _scan_rect(self, r: window.Rect) -> PixelRect:

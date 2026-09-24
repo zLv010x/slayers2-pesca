@@ -69,7 +69,11 @@ class BaitMenu:
     def _click(self, rect, line: ocr.Line) -> None:
         if FORBIDDEN_RX.search(line.text):
             raise MenuError(f"clique recusado por segurança em {line.text!r}")
-        screen.click_at(rect.x + line.x + line.w // 2, rect.y + line.y + line.h // 2)
+        self._click_xy(rect.x + line.x + line.w // 2, rect.y + line.y + line.h // 2, line.text)
+
+    def _click_xy(self, x: int, y: int, what: str) -> None:
+        if not screen.click_at(x, y):
+            raise MenuError(f"o mouse não chegou em {what!r} ({x}, {y})")
         self.f.sleep(WAIT_CLICK)
 
     @staticmethod
@@ -130,8 +134,7 @@ class BaitMenu:
         """Clica na busca, apaga, digita e aperta Enter (o jogo só filtra com Enter)."""
         rect, _ = self.f.frame()
         box = self.search_box
-        screen.click_at(rect.x + box.x + box.w // 2, rect.y + box.y + box.h // 2)
-        self.f.sleep(0.2)
+        self._click_xy(rect.x + box.x + box.w // 2, rect.y + box.y + box.h // 2, "busca")
         for _ in range(CLEAR_KEYS):
             screen.tap_key("backspace", hold_sec=0.01)
         if text:
@@ -162,8 +165,7 @@ class BaitMenu:
         if box is None:
             return False
         cx, cy = box.center
-        screen.click_at(rect.x + cx, rect.y + cy)
-        self.f.sleep(WAIT_CLICK)
+        self._click_xy(rect.x + cx, rect.y + cy, name)
         rect, img = self.f.frame()
         half = img.shape[0] // 2
         lines = ocr.read_lines(loot._white_text(img[half:]))

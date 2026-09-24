@@ -96,7 +96,7 @@ def test_digita_na_busca_e_aperta_enter(monkeypatch):
     import bait_menu
     from window import Rect
     keys = []
-    monkeypatch.setattr(bait_menu.screen, "click_at", lambda x, y: keys.append(("click", x, y)))
+    monkeypatch.setattr(bait_menu.screen, "click_at", lambda x, y: keys.append(("click", x, y)) or True)
     monkeypatch.setattr(bait_menu.screen, "tap_key", lambda k, hold_sec=0.08: keys.append(k))
     monkeypatch.setattr(bait_menu.screen, "type_text", lambda t: keys.append(("texto", t)))
     fisher = type("F", (), {"frame": lambda self: (Rect(0, 0, 100, 100), None), "sleep": lambda self, s: None})()
