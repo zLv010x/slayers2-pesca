@@ -971,6 +971,7 @@ def spawn_env(monkeypatch):
     def make(result_ok=True, **relog_over):
         f = FakeFisher([])
         f.cfg["relog"].update(relog_over)
+        f.spawn_auto_allowed, f._fished_ok = True, True
         f.cb.spawn_set = lambda ok: marked.append(ok)
         f.notifier = FakeNotifier()
         monkeypatch.setattr(cycle.relog_bridge, "set_spawn",
@@ -1010,3 +1011,20 @@ def test_pedido_pelo_botao_seta_mesmo_ja_setado(spawn_env):
     f.spawn_requested = True
     f._set_spawn_if_needed()
     assert calls == [True] and marked == [True] and f.spawn_requested is False
+
+
+def test_spawn_automatico_espera_o_primeiro_peixe(spawn_env):
+    make, calls, _ = spawn_env
+    f = make(enabled=True, has_spawn_gamepass=True, spawn_set=False)
+    f._fished_ok = False
+    f._set_spawn_if_needed()
+    assert calls == []
+
+
+def test_reinicio_sozinho_nunca_seta_o_spawn(spawn_env):
+    """Revisão de 24/09: depois de parar sozinha, o personagem pode estar em outro lugar."""
+    make, calls, _ = spawn_env
+    f = make(enabled=True, has_spawn_gamepass=True, spawn_set=False)
+    f.spawn_auto_allowed = False
+    f._set_spawn_if_needed()
+    assert calls == []

@@ -22,7 +22,8 @@ def _fake(**over):
         after=lambda ms, fn: scheduled.append((ms, fn)) or "job",
         status=SimpleNamespace(cget=lambda key: "Marque o ponto de lançamento antes de começar."),
     )
-    fake.toggle_run = lambda: setattr(fake, "_running", True)
+    fake.calls = []
+    fake.toggle_run = lambda **kw: fake.calls.append(kw) or setattr(fake, "_running", True)
     fake._auto_restart = lambda: app.App._auto_restart(fake)
     for key, value in over.items():
         setattr(fake, key, value)
@@ -42,13 +43,14 @@ def test_reinicio_normal_conta_e_avisa():
     fake = _fake()
     app.App._auto_restart(fake)
     assert fake._running is True
+    assert fake.calls == [{"by_user": False}]  # reinício sozinho nunca seta o spawn
     assert fake._restart_policy.recorded == 1
     assert any("Reiniciando" in m for m in fake.sent)
 
 
 def test_reinicio_que_nao_consegue_iniciar_avisa_o_motivo():
     fake = _fake()
-    fake.toggle_run = lambda: None  # ex.: ponto de lançamento apagado
+    fake.toggle_run = lambda **kw: None  # ex.: ponto de lançamento apagado
     app.App._auto_restart(fake)
     assert fake._restart_policy.recorded == 0
     assert len(fake.sent) == 1 and "Marque o ponto" in fake.sent[0]

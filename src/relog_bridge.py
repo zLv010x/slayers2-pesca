@@ -44,12 +44,14 @@ class RelogActions:
     def _abs(self, x: int, y: int) -> tuple[int, int]:
         return self._origin[0] + int(x), self._origin[1] + int(y)
 
-    def click(self, x: int, y: int) -> None:
-        screen.click_at(*self._abs(x, y))
+    def click(self, x: int, y: int) -> bool:
+        return bool(screen.click_at(*self._abs(x, y)))  # False = o cursor não chegou (mouse em uso)
 
-    def mouse_down(self, x: int, y: int) -> None:
-        screen.move_to(*self._abs(x, y))
+    def mouse_down(self, x: int, y: int) -> bool:
+        if not screen.move_to(*self._abs(x, y)):
+            return False  # não segura o botão onde o cursor estiver
         self.f.mouse.set(True)
+        return True
 
     def mouse_up(self) -> None:
         self.f.mouse.release()
@@ -74,8 +76,31 @@ class RelogActions:
 
 
 def set_spawn(f) -> spawn.SpawnResult:
-    """Seta o spawn (gamepass) onde o personagem está, pelos comandos do jogo."""
-    return spawn.Setter(RelogActions(f)).run()
+    """Seta o spawn (gamepass) onde o personagem está, pelos comandos do jogo.
+
+    Erro no meio (OCR etc.): tenta fechar a caixinha, para a pesca não apertar a tecla da
+    vara/T dentro dela, e devolve falha. F1 (StopRun) passa direto."""
+    actions = RelogActions(f)
+    try:
+        return spawn.Setter(actions).run()
+    except StopRun:
+        raise
+    except Exception as exc:
+        log.exception("Erro ao setar o spawn")
+        _close_command_box(actions)
+        return spawn.SpawnResult(False, f"erro inesperado ({type(exc).__name__})")
+
+
+def _close_command_box(actions: RelogActions) -> None:
+    try:
+        _, _, frame = actions.grab()
+        s = spawn.classify(frame)
+        if s.cancel_pos is not None:
+            actions.click(*s.cancel_pos)
+    except StopRun:
+        raise
+    except Exception:
+        log.exception("Também não consegui fechar a caixinha de comandos")
 
 
 def not_ready_reason(cfg: dict) -> str | None:

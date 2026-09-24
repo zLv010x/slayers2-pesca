@@ -301,7 +301,7 @@ class App(ctk.CTk):
         self.session_tab.refresh()
 
     # ------------------------------------------------------------ pesca
-    def toggle_run(self) -> None:
+    def toggle_run(self, by_user: bool = True) -> None:
         if self._listening or self._picker_open:
             return
         if self._running:
@@ -330,6 +330,7 @@ class App(ctk.CTk):
         fisher.bait_check_requested = self._bait_check_pending
         self._bait_check_pending = False
         fisher.spawn_requested = self._spawn_pending
+        fisher.spawn_auto_allowed = by_user  # reinício sozinho nunca seta o spawn
         self._spawn_pending = False
         self._fisher = fisher
         self._worker = threading.Thread(target=self._run_worker, args=(fisher,), daemon=True)
@@ -439,7 +440,7 @@ class App(ctk.CTk):
             # marcando ponto/atalho agora: tenta daqui a pouco, sem gastar a vez
             self._restart_job = self.after(RESTART_RETRY_MS, self._auto_restart)
             return
-        self.toggle_run()
+        self.toggle_run(by_user=False)
         if not self._running:
             self._notify_problem(f"⚠️ Não consegui reiniciar a pesca sozinha: {self.status.cget('text')}")
             return

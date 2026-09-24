@@ -125,8 +125,10 @@ class Fisher:
         self.bait_path = bait_path
         self.bait_check_requested = False
         self._bait_retry_at = 0
-        self.spawn_requested = False   # botão "Setar spawn agora"
-        self._spawn_tried = False      # automático: só uma tentativa por rodada
+        self.spawn_requested = False     # botão "Setar spawn agora"
+        self.spawn_auto_allowed = False  # só quando a pessoa apertou Iniciar (não no reinício sozinho)
+        self._spawn_tried = False        # automático: só uma tentativa por rodada
+        self._fished_ok = False          # já pegou um peixe nesta rodada (está no ponto certo)
         self._no_bait_warned = False
         self._menu_stuck = False
         self.cfg = cfg
@@ -760,6 +762,7 @@ class Fisher:
             return
         self.failed_casts = 0
         self.collect()
+        self._fished_ok = True
         if self._baits_on():
             # o jogo gasta 1 isca a cada mordida resolvida (pegando ou não)
             spent = self.baits.consume(time.perf_counter() - cycle_start, self.cfg["baits"]["infinite"])
@@ -778,8 +781,10 @@ class Fisher:
         """Seta o spawn no ponto de pesca: a pedido (botão) ou sozinho, uma vez, quando o auto
         relog está ligado, a pessoa tem o gamepass e ainda não setou (senão o relog nasceria longe)."""
         r = self.cfg.get("relog", {})
+        # automático só depois do 1º peixe (prova que o personagem está no ponto de pesca)
+        # e só se foi a pessoa que iniciou: um reinício sozinho pode estar em outro lugar
         auto = (r.get("enabled") and r.get("has_spawn_gamepass") and not r.get("spawn_set")
-                and not self._spawn_tried)
+                and self.spawn_auto_allowed and self._fished_ok and not self._spawn_tried)
         if not (self.spawn_requested or auto):
             return
         self.spawn_requested, self._spawn_tried = False, True

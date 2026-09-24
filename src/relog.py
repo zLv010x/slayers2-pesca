@@ -414,7 +414,8 @@ class Relogger:
         "muda": o botão vira JOIN PRIVATE no meio da segurada e soltar ali cancela a entrada.
         Sempre solta no final, mesmo se algo der exceção no meio do caminho."""
         a = self.actions
-        a.mouse_down(x, y)
+        if a.mouse_down(x, y) is False:
+            return  # o cursor não chegou no JOIN: não segura o botão em outro lugar
         try:
             deadline = a.now() + self.cfg.get("hold_join_sec", DEFAULTS["hold_join_sec"])
             while a.now() < deadline:

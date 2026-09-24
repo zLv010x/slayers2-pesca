@@ -1,6 +1,7 @@
 """Seta o spawn (gamepass) no ponto de pesca pelos comandos do jogo.
 
-Fluxo (prints do usuário, 24/09): botão "Commands" no canto superior direito → vira
+Fluxo (prints do usuário, 24/09): botão "Commands" no alto da tela (≈13% da largura,
+à esquerda; na janela estreita ≈43%) → vira
 um X vermelho + a caixinha "command" (ainda não aceita texto) → clicar na caixinha abre
 a lista de comandos (agora aceita) → digitar "set" + Enter → aparece X + "set" + ✓ verde
 → clicar no ✓ → volta ao normal. O "set" é digitado (e não clicado na lista) porque fora
@@ -20,8 +21,10 @@ import numpy as np
 
 import ocr
 
-REGION_X = (0.55, 1.0)   # canto superior direito (a lista de comandos desce bastante)
-REGION_Y = (0.0, 0.55)
+# Parte de cima da tela inteira: o botão fica no alto e a lista desce ~25% da altura.
+# Até 40%: o painel da party (que tem "PVP", uma palavra de comando) começa abaixo disso.
+REGION_X = (0.0, 1.0)
+REGION_Y = (0.0, 0.40)
 OCR_UPSCALE = 2
 # Faixa em volta do X, lida de novo bem ampliada: na interface menor o "set" (3 letras
 # pequenas) some no OCR da região inteira.
@@ -30,7 +33,12 @@ STRIP_UPSCALE = 4
 STRIP_MAX_BLOBS = 2
 COMMAND_WORDS = {"access", "announce", "ban", "kick", "mod", "pve", "pvp", "set", "shutdown",
                  "unban", "unmod", "unset", "unwhitelist", "whitelist"}
-MIN_LIST_WORDS = 2
+# Ordem da lista no jogo (alfabética); fora do VIP a lista é menor, mas na mesma ordem.
+COMMAND_ORDER = ["access", "announce", "ban", "kick", "mod", "pve", "pvp", "set", "shutdown",
+                 "unban", "unmod", "unset", "unwhitelist", "whitelist"]
+MIN_LIST_WORDS = 3
+LIST_FIRST_GAP_LINES = 4   # 1º item logo abaixo da caixinha (até 4 alturas de texto)
+LIST_COLUMN_WIDTHS = 1.5   # itens na coluna da caixinha (até 1,5 largura dela para o lado)
 # Cores (HSV do OpenCV): X vermelho e ✓ verde
 RED_HUE = (8, 172)       # vermelho = matiz <= 8 ou >= 172
 GREEN_HUE = (45, 85)
@@ -48,6 +56,8 @@ STEP_TIMEOUT_SEC = 6.0    # mesma tela por mais que isso = travou
 TYPE_CONFIRM_SEC = 3.0    # digitou e a caixinha não mostrou "set"
 NO_BUTTON_SEC = 5.0       # nem achou o botão Commands
 TOTAL_TIMEOUT_SEC = 30.0
+LIST_READS_TO_TYPE = 2     # lista aberta em leituras seguidas antes de digitar
+MAX_READ_GAP_SEC = 1.0     # leitura atrasada (Roblox saiu da frente?) recomeça a contagem
 
 
 @dataclass(frozen=True)
@@ -118,6 +128,25 @@ def _strip_lines(frame: np.ndarray, blob: tuple[int, int, int]) -> list[ocr.Line
     return [ocr.Line(l.text, l.x + x0, l.y + y0, l.w, l.h) for l in raw]
 
 
+def _list_under(pill: ocr.Line, lines: list[ocr.Line]) -> bool:
+    """A lista de comandos está aberta embaixo DESTA caixinha? Palavras soltas na tela não
+    contam: só itens na coluna dela, começando logo abaixo, 3+ na ordem da lista do jogo."""
+    left = pill.x - LIST_COLUMN_WIDTHS * pill.w
+    right = pill.x + pill.w + LIST_COLUMN_WIDTHS * pill.w
+    items, seen = [], set()
+    for line in sorted(lines, key=lambda l: l.y):
+        word, cx = _squash(line.text), line.x + line.w // 2
+        if word in COMMAND_WORDS and line.y > pill.y + pill.h and left <= cx <= right and word not in seen:
+            items.append(line)
+            seen.add(word)
+    if len(items) < MIN_LIST_WORDS:
+        return False
+    if items[0].y - (pill.y + pill.h) > LIST_FIRST_GAP_LINES * pill.h:
+        return False
+    order = [COMMAND_ORDER.index(_squash(l.text)) for l in items]
+    return order == sorted(order)
+
+
 def classify(frame: np.ndarray | None) -> SpawnScreen:
     if frame is None or frame.size == 0:
         return SpawnScreen("unknown")
@@ -144,8 +173,7 @@ def classify(frame: np.ndarray | None) -> SpawnScreen:
             if ok is None:
                 return SpawnScreen("typed", pill_pos=pill, cancel_pos=cancel_pos)
             return SpawnScreen("confirm", pill_pos=pill, cancel_pos=cancel_pos, confirm_pos=ok[:2])
-        below = [l for l in lines if l.y > line.y + line.h and _squash(l.text) in COMMAND_WORDS]
-        kind = "list_open" if len(below) >= MIN_LIST_WORDS else "closed_box"
+        kind = "list_open" if _list_under(line, lines) else "closed_box"
         return SpawnScreen(kind, pill_pos=pill, cancel_pos=cancel_pos)
     commands = next((l for l in lines if _squash(l.text) == "commands"), None)
     if commands is not None:
@@ -168,38 +196,45 @@ class Setter:
         a = self.a
         start = a.now()
         self._clicked: dict[str, float] = {}
-        self._cancel: tuple[int, int] | None = None
         self._typed_at: float | None = None
         self._entered = self._confirmed = self._seen = False
+        self._list_reads, self._last_read = 0, None
+        s = SpawnScreen("unknown")
         kind_now, kind_since = None, start
         while a.now() - start < self.timeout:
             _, _, frame = a.grab()
             s = classify(frame)
             now = a.now()
+            if self._last_read is not None and now - self._last_read > MAX_READ_GAP_SEC:
+                self._list_reads = 0  # leitura atrasada: a caixinha pode ter perdido o foco
+            self._last_read = now
             if s.kind != kind_now:
                 kind_now, kind_since = s.kind, now
-            self._cancel = s.cancel_pos or self._cancel
+            self._list_reads = self._list_reads + 1 if s.kind == "list_open" else 0
             result = self._step(s, now, now - kind_since)
             if result is not None:
                 return result
             a.sleep(POLL_SEC)
-        return self._give_up("tempo esgotado")
+        return self._give_up(s, "tempo esgotado")
 
     def _step(self, s: SpawnScreen, now: float, same_for: float) -> SpawnResult | None:
         if s.kind == "unknown":
+            if self._confirmed:
+                return self._done()  # clicou no ✓ e a caixinha sumiu
             if not self._seen and same_for >= NO_BUTTON_SEC:
                 return SpawnResult(False, "não achei o botão Commands")
+            if self._seen and same_for >= STEP_TIMEOUT_SEC:
+                return self._give_up(s, "a tela ficou irreconhecível")
             return None
         self._seen = True
         if same_for >= STEP_TIMEOUT_SEC:
-            return self._give_up(f"travou em '{s.kind}'")
+            return self._give_up(s, f"travou em '{s.kind}'")
         handler = getattr(self, f"_on_{s.kind}")
         return handler(s, now)
 
     def _on_normal(self, s: SpawnScreen, now: float) -> SpawnResult | None:
         if self._confirmed:
-            self.a.status("Spawn setado no ponto de pesca.")
-            return SpawnResult(True, "ok")
+            return self._done()
         if self._typed_at is not None:
             return SpawnResult(False, "a caixinha fechou sem confirmar")
         self._click_once("normal", s.commands_pos, now)
@@ -207,20 +242,25 @@ class Setter:
 
     def _on_closed_box(self, s: SpawnScreen, now: float) -> SpawnResult | None:
         if self._typed_at is not None:
-            return self._give_up("o texto não entrou na caixinha")
+            return self._give_up(s, "o texto não entrou na caixinha")
         self._click_once("closed_box", s.pill_pos, now)
         return None
 
     def _on_list_open(self, s: SpawnScreen, now: float) -> SpawnResult | None:
         if self._typed_at is None:
-            self.a.status("Setando o spawn: digitando 'set'.")
-            self.a.type_text("set")  # a lista aberta prova que a caixinha está ativa
-            self._typed_at = now
+            if "closed_box" not in self._clicked:
+                return self._give_up(s, "a lista já estava aberta (não fui eu que abri)")
+            if self._list_reads >= LIST_READS_TO_TYPE:
+                self.a.status("Setando o spawn: digitando 'set'.")
+                self.a.type_text("set")  # lista aberta em leituras seguidas = caixinha ativa
+                self._typed_at = now
         elif now - self._typed_at >= TYPE_CONFIRM_SEC:
-            return self._give_up("o texto não entrou na caixinha")
+            return self._give_up(s, "o texto não entrou na caixinha")
         return None
 
     def _on_typed(self, s: SpawnScreen, now: float) -> SpawnResult | None:
+        if self._typed_at is None:
+            return self._give_up(s, "a caixinha já tinha 'set' (não fui eu que digitei)")
         if not self._entered:
             self.a.press("enter")
             self._entered = True
@@ -228,7 +268,7 @@ class Setter:
 
     def _on_confirm(self, s: SpawnScreen, now: float) -> SpawnResult | None:
         if not self._entered:
-            return self._give_up("apareceu um ✓ sem eu ter digitado nada")
+            return self._give_up(s, "apareceu um ✓ sem eu ter digitado nada")
         if self._click_once("confirm", s.confirm_pos, now):
             self._confirmed = True
         return None
@@ -238,11 +278,17 @@ class Setter:
         if pos is None or now - self._clicked.get(key, -CLICK_COOLDOWN_SEC) < CLICK_COOLDOWN_SEC:
             return False
         self._clicked[key] = now
-        self.a.click(*pos)
-        return True
+        return self.a.click(*pos) is not False  # clique que não saiu (mouse em uso) não conta
 
-    def _give_up(self, reason: str) -> SpawnResult:
-        if self._cancel is not None:
-            self.a.click(*self._cancel)  # fecha a caixinha: nada fica aberto no jogo
+    def _done(self) -> SpawnResult:
+        self.a.status("Spawn setado no ponto de pesca.")
+        return SpawnResult(True, "ok")
+
+    def _give_up(self, s: SpawnScreen, reason: str) -> SpawnResult:
+        """Desiste; fecha a caixinha só se o X estiver na tela AGORA (nunca clica onde ele estava)."""
+        if s.cancel_pos is not None:
+            self.a.click(*s.cancel_pos)
+        elif self._seen:
+            reason += " (a caixinha pode ter ficado aberta)"
         self.a.status(f"Não consegui setar o spawn: {reason}.")
         return SpawnResult(False, reason)

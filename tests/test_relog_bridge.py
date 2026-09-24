@@ -155,3 +155,30 @@ def test_set_spawn_usa_as_acoes_da_pesca(monkeypatch):
     monkeypatch.setattr(relog_bridge.spawn, "Setter", FakeSetter)
     assert relog_bridge.set_spawn(SimpleNamespace()).ok
     assert seen == ["RelogActions"]
+
+
+def test_erro_no_meio_do_spawn_fecha_a_caixinha_e_devolve_falha(monkeypatch):
+    clicks = []
+
+    class Boom:
+        def __init__(self, actions):
+            pass
+
+        def run(self):
+            raise RuntimeError("ocr quebrou")
+    monkeypatch.setattr(relog_bridge.spawn, "Setter", Boom)
+    monkeypatch.setattr(relog_bridge.spawn, "classify",
+                        lambda frame: relog_bridge.spawn.SpawnScreen("closed_box", cancel_pos=(5, 6)))
+    monkeypatch.setattr(relog_bridge.screen, "click_at", lambda x, y: clicks.append((x, y)) or True)
+    f = SimpleNamespace(rect=lambda: Rect(100, 50, 800, 600), grabber=SimpleNamespace(grab=lambda r: "img"))
+    result = relog_bridge.set_spawn(f)
+    assert not result.ok and "RuntimeError" in result.reason
+    assert clicks == [(105, 56)]
+
+
+def test_segurar_join_sem_o_cursor_chegar_nao_aperta(monkeypatch):
+    pressed = []
+    monkeypatch.setattr(relog_bridge.screen, "move_to", lambda x, y: False)
+    f = SimpleNamespace(mouse=SimpleNamespace(set=lambda on: pressed.append(on)))
+    assert relog_bridge.RelogActions(f).mouse_down(10, 10) is False
+    assert pressed == []
