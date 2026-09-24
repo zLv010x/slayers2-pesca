@@ -78,6 +78,22 @@ DEFAULTS: dict = {
         "recheck_at": 10,               # confere o inventário quando faltarem isso
     },
     # overlay_pos: {"x", "y"} em fração da janela do Roblox (None = em cima da party)
+    # Auto relog: quando o jogo cai (menu/Disconnected), reconecta sozinho. Só funciona com o
+    # gamepass de spawn e o spawn setado no ponto de pesca (senão nasce longe da água).
+    "relog": {
+        "enabled": False,
+        "has_spawn_gamepass": False,
+        "spawn_set": False,
+        "server_mode": "vip",          # "vip" = servidor privado próprio | "nick" = de outra pessoa
+        "owner_nick": "",
+        "map_name": "Ouwland",
+        "hold_join_sec": 2.0,
+        "step_timeout_sec": 90.0,
+        "total_timeout_sec": 600.0,
+        "settle_sec": 8.0,
+        "max_per_hour": 4,
+        "no_reconnect_codes": [264],   # 264 = a conta entrou de outro PC: reconectar derrubaria
+    },
     "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True,
            "overlay": True, "overlay_pos": None},
     "config_rev": 3,

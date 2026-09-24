@@ -24,6 +24,13 @@ class FakeFisher(cycle.Fisher):
         return None, self._seq.pop(0)
 
 
+def _as_lost(is_menu):
+    """Simula a tela do jogo caído: `is_menu(img)` verdadeiro = menu principal na tela."""
+    import relog
+    menu_screen = relog.Screen(kind="main_menu", play_pos=(1, 1))
+    return lambda img, cfg=None: menu_screen if is_menu(img) else None
+
+
 @pytest.fixture(autouse=True)
 def no_real_cursor(monkeypatch):
     """Nenhum teste do ciclo pode mexer no cursor de verdade."""
@@ -596,7 +603,7 @@ def test_recuperacao_no_menu_principal_para_de_vez_e_avisa(monkeypatch):
     monkeypatch.setattr(cycle.screen, "release_right_button", lambda: None)
     monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
-    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: True)
+    monkeypatch.setattr(cycle.relog_bridge, "lost_game_screen", _as_lost(lambda img: True))
     f = FakeFisher([])
     f.notifier = FakeNotifier()
     f.cfg["discord"]["notify_problems"] = True
@@ -614,7 +621,7 @@ def test_recuperacao_fora_do_menu_segue_normal(monkeypatch):
     monkeypatch.setattr(cycle.screen, "release_right_button", lambda: None)
     monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
-    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: False)
+    monkeypatch.setattr(cycle.relog_bridge, "lost_game_screen", _as_lost(lambda img: False))
     f = FakeFisher([])
     f.notifier = FakeNotifier()
     f.cfg["timings"]["recovery_wait_sec"] = 0
@@ -627,7 +634,7 @@ def test_bussola_sumida_por_causa_do_menu_para_em_vez_de_pausar_para_sempre(monk
     monkeypatch.setattr(cycle, "time", clock)
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
     checks = []
-    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: checks.append(img) or len(checks) >= 2)
+    monkeypatch.setattr(cycle.relog_bridge, "lost_game_screen", _as_lost(lambda img: checks.append(img) or len(checks) >= 2))
     f = FakeFisher([None] * 50)
     f.compass = FakeCompass([None] * 50)
     f.cfg["auto_camera"] = False  # testando a checagem de menu na pausa, não a varredura
@@ -643,7 +650,7 @@ def test_camera_girada_nao_procura_menu(monkeypatch):
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
     monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: True)
     called = []
-    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: called.append(True) or False)
+    monkeypatch.setattr(cycle.relog_bridge, "lost_game_screen", _as_lost(lambda img: called.append(True) or False))
     f = FakeFisher([None] * 3)
     f.compass = FakeCompass([40, 40, 0])  # bússola achada, só girada: não é o menu
     f.cfg["auto_camera"] = False  # testando a pausa manual (sem menu), não a correção sozinha
@@ -723,7 +730,7 @@ def test_recuperacao_manda_anti_idle_durante_espera_longa(monkeypatch):
     monkeypatch.setattr(cycle.screen, "release_right_button", lambda: None)
     monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
-    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: False)
+    monkeypatch.setattr(cycle.relog_bridge, "lost_game_screen", _as_lost(lambda img: False))
     monkeypatch.setattr(cycle.window, "is_foreground", lambda hwnd: True)
     nudges = []
     monkeypatch.setattr(cycle.screen, "anti_idle_nudge", lambda: nudges.append(True))
@@ -905,7 +912,7 @@ def test_recover_solta_botao_direito(monkeypatch):
     monkeypatch.setattr(cycle.screen, "release_key", lambda k: None)
     monkeypatch.setattr(cycle.screen.MouseButton, "release", lambda self: None)
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
-    monkeypatch.setattr(cycle.menu, "is_main_menu", lambda img: False)
+    monkeypatch.setattr(cycle.relog_bridge, "lost_game_screen", _as_lost(lambda img: False))
     released = []
     monkeypatch.setattr(cycle.screen, "release_right_button", lambda: released.append(True))
     f = FakeFisher([])

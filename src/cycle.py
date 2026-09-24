@@ -22,8 +22,8 @@ import bait_menu
 import hotbar
 import logbook
 import loot as loot_mod
-import menu
 import prompt as prompt_mod
+import relog_bridge
 import screen
 import window
 from bar_control import TrackController
@@ -31,7 +31,9 @@ from bar_detect import Detector
 from baits import BaitState
 from catalog import Catalog
 from compass import CompassLock
+from restart_policy import RestartPolicy
 from session import Session
+from stops import Relogged, StopRun
 from webhook import DiscordNotifier, LootReport
 
 SEARCH_PAD_X, SEARCH_PAD_X_MIN = 1.5, 80
@@ -78,10 +80,6 @@ AUTO_CAMERA_SWEEP_STEPS = 12
 AUTO_CAMERA_SWEEP_STEP_PX = 400
 
 log = logbook.get()
-
-
-class StopRun(Exception):
-    """Pedido de parada (F1) ou problema que exige parar a macro."""
 
 
 class Recoverable(Exception):
@@ -136,6 +134,7 @@ class Fisher:
         self.failed_casts = 0
         self.recoveries = 0
         self.cycles = 0
+        self.relog_budget = RestartPolicy()  # reconexões na última hora
         self.stop_for_good = False  # parada em que reiniciar sozinho não adianta (menu principal)
         self._last_status = ""
         self._status_cb = cb.status
@@ -258,7 +257,8 @@ class Fisher:
             now = time.perf_counter()
             if drift is None and (menu_checked is None or now - menu_checked >= MENU_CHECK_SEC):
                 menu_checked = now
-                self._stop_if_main_menu(img)  # sem bússola porque nem há personagem?
+                if relog_bridge.handle(self, img):  # sem bússola porque o jogo caiu?
+                    raise Relogged()
             if drift is not None and abs(drift) <= tol:
                 if paused_at is not None:
                     log.info("Câmera voltou para a posição (desvio %+dpx).", drift)
@@ -755,7 +755,8 @@ class Fisher:
         self.mouse.release()
         screen.release_key("t")
         screen.release_right_button()
-        self._stop_if_main_menu(img if img is not None else self._safe_shot())
+        if relog_bridge.handle(self, img if img is not None else self._safe_shot()):
+            return  # o jogo tinha caído e já reconectou: recomeça o ciclo sem contar problema
         self.recoveries += 1
         limit = int(self.cfg["limits"]["max_recoveries"])
         logbook.save_evidence(img, msg)
@@ -769,24 +770,6 @@ class Fisher:
                      ping=self.recoveries == 1)
         self.cb.status(f"Recuperando ({self.recoveries}/{limit}): {msg}. Nova tentativa em {wait:.0f}s.")
         self._wait_with_anti_idle(wait)
-
-    def _stop_if_main_menu(self, img: np.ndarray | None) -> None:
-        """No menu principal não há personagem: tentar de novo não adianta, então para de vez e avisa."""
-        try:
-            on_menu = menu.is_main_menu(img)
-        except Exception:  # OCR falhou: segue como um problema comum
-            log.exception("Não consegui conferir se o jogo está no menu principal")
-            return
-        if not on_menu:
-            return
-        key = self.cfg["hotkeys"]["start_stop"]
-        msg = ("o jogo voltou para o menu principal (o servidor reiniciou ou você caiu). "
-               f"Entre de novo, volte ao ponto de pesca e aperte {key}.")
-        log.error("Menu principal na tela: %s", msg)
-        logbook.save_evidence(img, "menu principal")
-        self._notify("🏠 Pesca parada: " + msg)
-        self.stop_for_good = True
-        raise StopRun("Parei: " + msg)
 
     def _safe_shot(self) -> np.ndarray | None:
         try:
@@ -817,6 +800,8 @@ class Fisher:
                     self.one_cycle()
                 except Recoverable as exc:
                     self._recover(str(exc), exc.img)
+                except Relogged:
+                    log.info("Recomeçando a pesca depois de reconectar.")
                 except StopRun:
                     raise
                 except Exception as exc:  # bug inesperado: registra tudo e segue pescando
