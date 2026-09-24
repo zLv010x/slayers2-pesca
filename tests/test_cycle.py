@@ -418,3 +418,132 @@ def test_t_fica_apertado_pelo_menos_3_25s(game_env, monkeypatch):
     first_press = presses[0]
     first_release = min(r for r in releases if r > first_press)
     assert first_release - first_press >= cycle.MIN_T_HOLD_SEC
+
+
+# ---------------------------------------------------------------- cast()
+
+@pytest.fixture
+def cast_env(monkeypatch):
+    """cast() com relógio falso e rect() de mentira (sem depender do Roblox de verdade)."""
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    f = FakeFisher([])
+    f.rect = lambda: cycle.window.Rect(0, 0, 100, 100)
+    f.cfg["cast_point"] = {"x": 0.5, "y": 0.5}
+    f.cfg["timings"]["after_cast_sec"] = 0
+    f.notifier = FakeNotifier()
+    f.cfg["discord"]["notify_problems"] = True
+    return f, clock
+
+
+def test_lancamento_com_mouse_em_uso_tenta_de_novo_sem_contar_recuperacao(cast_env, monkeypatch):
+    f, clock = cast_env
+    monkeypatch.setattr(cycle.screen, "on_monitor", lambda x, y: True)
+    monkeypatch.setattr(cycle.screen, "click_at",
+                        lambda x, y: cycle.screen.MoveResult(False, "mexendo", (x + 5, y + 5)))
+    waits = []
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: waits.append(1))
+    with pytest.raises(cycle.Recoverable):
+        f.cast()
+    # tenta CAST_BUSY_TRIES vezes, espera entre elas (uma a menos que as tentativas)
+    assert len(waits) == cycle.CAST_BUSY_TRIES - 1
+    assert f.recoveries == 0  # não é _recover quem trata isso: quem conta é o `run()`
+
+
+def test_lancamento_com_mouse_preso_tambem_tenta_de_novo(cast_env, monkeypatch):
+    f, clock = cast_env
+    monkeypatch.setattr(cycle.screen, "on_monitor", lambda x, y: True)
+    monkeypatch.setattr(cycle.screen, "click_at",
+                        lambda x, y: cycle.screen.MoveResult(False, "preso", (x, y)))
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: None)
+    with pytest.raises(cycle.Recoverable):
+        f.cast()
+
+
+def test_lancamento_recupera_se_o_mouse_ficar_livre_antes_do_limite(cast_env, monkeypatch):
+    f, clock = cast_env
+    monkeypatch.setattr(cycle.screen, "on_monitor", lambda x, y: True)
+    attempts = {"n": 0}
+
+    def fake_click(x, y):
+        attempts["n"] += 1
+        if attempts["n"] < 2:
+            return cycle.screen.MoveResult(False, "mexendo", (x + 5, y + 5))
+        return cycle.screen.MoveResult(True, "ok", (x, y))
+
+    monkeypatch.setattr(cycle.screen, "click_at", fake_click)
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: None)
+    f.cast()  # não deve levantar Recoverable
+    assert attempts["n"] == 2
+
+
+def test_lancamento_fora_do_monitor_pausa_ate_a_janela_voltar_sem_recuperar(cast_env, monkeypatch):
+    f, clock = cast_env
+    f.cfg["timings"]["recovery_wait_sec"] = 999  # não notifica durante o teste
+    monitor_calls = []
+
+    def fake_on_monitor(x, y):
+        monitor_calls.append((x, y))
+        return len(monitor_calls) > 2  # só "volta" na 3ª conferência
+
+    clicks = []
+    monkeypatch.setattr(cycle.screen, "on_monitor", fake_on_monitor)
+    monkeypatch.setattr(cycle.screen, "click_at",
+                        lambda x, y: clicks.append((x, y)) or cycle.screen.MoveResult(True, "ok", (x, y)))
+    f.cast()
+    assert len(monitor_calls) == 3
+    assert clicks == [(50, 50)]
+    assert f.recoveries == 0
+    assert f.notifier.sent == []  # dentro do recovery_wait_sec: nenhum aviso ainda
+
+
+def test_lancamento_fora_do_monitor_avisa_no_discord_apos_o_tempo(cast_env, monkeypatch):
+    f, clock = cast_env
+    f.cfg["timings"]["recovery_wait_sec"] = 0
+    monitor_calls = []
+
+    def fake_on_monitor(x, y):
+        monitor_calls.append((x, y))
+        return len(monitor_calls) > 1
+
+    monkeypatch.setattr(cycle.screen, "on_monitor", fake_on_monitor)
+    monkeypatch.setattr(cycle.screen, "click_at",
+                        lambda x, y: cycle.screen.MoveResult(True, "ok", (x, y)))
+    f.cast()
+    assert any("fora do monitor" in text for text, _ in f.notifier.sent)
+
+
+# ---------------------------------------------------------------- check_camera()
+
+class FakeCompass:
+    """Bússola de mentira: os desvios de cada leitura já vêm prontos."""
+
+    def __init__(self, drifts):
+        self.ready = True
+        self._drifts = list(drifts)
+
+    def drift_px(self, img):
+        return self._drifts.pop(0)
+
+
+def test_camera_espera_botao_direito_soltar_depois_de_voltar(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(cycle, "time", clock)
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    f = FakeFisher([None, None])   # duas leituras: uma fora de tolerância, outra dentro
+    f.compass = FakeCompass([50, 0])
+    f.cfg["timings"]["recovery_wait_sec"] = 999
+    waited = []
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: waited.append(True))
+    f.check_camera()
+    assert waited == [True]  # só espera quando a câmera realmente saiu do lugar e voltou
+
+
+def test_camera_sem_desvio_nao_espera_mouse_livre(monkeypatch):
+    f = FakeFisher([None])
+    f.compass = FakeCompass([0])
+    called = []
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: called.append(True))
+    f.check_camera()
+    assert called == []  # sem pausa nenhuma: não precisa esperar nada extra

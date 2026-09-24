@@ -81,8 +81,11 @@ class BaitMenu:
         self._click_xy(rect.x + line.x + line.w // 2, rect.y + line.y + line.h // 2, line.text)
 
     def _click_xy(self, x: int, y: int, what: str) -> None:
-        if not screen.click_at(x, y):
-            raise MenuError(f"o mouse não chegou em {what!r} ({x}, {y})")
+        result = screen.click_at(x, y)
+        if not result:
+            # `result` pode ser só um bool (testes) ou um MoveResult com motivo/posição
+            detail = f": {result.reason}, cursor em {result.pos}" if hasattr(result, "reason") else ""
+            raise MenuError(f"o mouse não chegou em {what!r} ({x}, {y}){detail}")
         self.f.sleep(WAIT_CLICK)
 
     @staticmethod

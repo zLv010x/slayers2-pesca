@@ -36,6 +36,11 @@ from webhook import DiscordNotifier, LootReport
 SEARCH_PAD_X, SEARCH_PAD_X_MIN = 1.5, 80
 SEARCH_PAD_Y, SEARCH_PAD_Y_MIN = 0.125, 24
 START_HITS = 2
+# Lançamento com o mouse em uso (usuário mexendo ou botão preso girando a câmera):
+# tenta de novo sem contar como recuperação; só desiste depois disso.
+CAST_BUSY_TRIES = 3
+# Ponto de lançamento fora do monitor (janela saindo da tela): confere de novo nesse intervalo.
+OFF_MONITOR_POLL_SEC = 1.0
 RELEASE_AFTER_LOST_SEC = 0.3
 POPUP_POLL_SEC = 0.25
 COLLECT_POLL_SEC = 0.05
@@ -215,6 +220,8 @@ class Fisher:
             if drift is not None and abs(drift) <= tol:
                 if paused_at is not None:
                     log.info("Câmera voltou para a posição (desvio %+dpx).", drift)
+                    # a câmera gira segurando o botão direito: espera soltar antes de lançar
+                    screen.wait_mouse_free(sleep=self.sleep)
                 return
             msg = "bússola não encontrada" if drift is None else f"câmera girou {drift:+d}px"
             if paused_at is None:
@@ -228,13 +235,44 @@ class Fisher:
 
     def cast(self) -> None:
         pt = self.cfg["cast_point"]
+        busy_tries = 0
         r = self.rect()
         x, y = self.to_screen(r, pt["x"], pt["y"])
-        self.cb.status("Lançando...")
-        log.debug("Clique de lançamento em (%d, %d) na janela %dx%d", x, y, r.w, r.h)
-        if not screen.click_at(x, y):
-            raise Recoverable(f"o mouse não chegou no ponto de lançamento ({x}, {y})", self._safe_shot())
-        self.sleep(self.t("after_cast_sec"))
+        while True:
+            if not screen.on_monitor(x, y):
+                r, x, y = self._wait_cast_point_on_monitor()
+            self.cb.status("Lançando...")
+            log.debug("Clique de lançamento em (%d, %d) na janela %dx%d", x, y, r.w, r.h)
+            result = screen.click_at(x, y)
+            if result.ok:
+                self.sleep(self.t("after_cast_sec"))
+                return
+            log.warning("Lançamento não chegou ao ponto (%s, cursor em %s).", result.reason, result.pos)
+            busy_tries += 1
+            if busy_tries >= CAST_BUSY_TRIES:
+                raise Recoverable(f"o mouse não chegou no ponto de lançamento ({x}, {y})", self._safe_shot())
+            self.cb.status("Pausado: mouse em uso. Esperando soltar...")
+            screen.wait_mouse_free(sleep=self.sleep)
+            r = self.rect()
+            x, y = self.to_screen(r, pt["x"], pt["y"])
+
+    def _wait_cast_point_on_monitor(self) -> tuple[window.Rect, int, int]:
+        """A janela saiu (parcialmente) da tela e o ponto de lançamento ficou fora do
+        monitor: pausa até a janela voltar, sem contar como recuperação."""
+        msg = "a janela do Roblox está saindo da tela; o ponto de lançamento ficou fora do monitor"
+        paused_at, notified = time.perf_counter(), False
+        logbook.save_evidence(self._safe_shot(), "lançamento fora do monitor")
+        while True:
+            self.cb.status(f"Pausado: {msg}.")
+            if not notified and time.perf_counter() - paused_at >= self.t("recovery_wait_sec"):
+                self._notify(f"⏸️ Pesca pausada: {msg}. Mova a janela do Roblox de volta para a tela.")
+                notified = True
+            self.sleep(OFF_MONITOR_POLL_SEC)
+            r = self.rect()
+            x, y = self.to_screen(r, self.cfg["cast_point"]["x"], self.cfg["cast_point"]["y"])
+            if screen.on_monitor(x, y):
+                log.info("Ponto de lançamento voltou para dentro do monitor.")
+                return r, x, y
 
     def _scan_rect(self, r: window.Rect) -> PixelRect:
         sa = self.cfg["scan_area"]
