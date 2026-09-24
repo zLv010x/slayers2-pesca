@@ -45,7 +45,9 @@ PROMPT_LOST_SEC = 0.6
 PROMPT_LOST_CHECKS = 3
 # Se o aviso nunca aparecer nesse tempo, segura T "no escuro" (como a versão antiga).
 PROMPT_GRACE_SEC = 1.0
-HOLD_SLACK_SEC = 1.5
+# Log real: segurar T por 4,5-4,7s (com aviso na tela) falhou; o que funcionou foi ~2,4s.
+# Folga curta para reiniciar o T logo depois do mínimo, sem deixar a tentativa esticar.
+HOLD_SLACK_SEC = 0.5
 # Pedido do usuário: segurar T sempre pelo menos isso (o jogo pede ~2,3 s).
 MIN_T_HOLD_SEC = 3.25
 FOREGROUND_POLL_SEC = 0.5
@@ -323,6 +325,7 @@ class Fisher:
         start = time.perf_counter()
         deadline = start + budget
         holding, hold_since, last_seen, seen_any, restarts = False, 0.0, -1.0, False, 0
+        released_at = start  # marca a última vez que soltou (ou o início, se nunca soltou)
         misses, polls = 0, 0
         self.cb.status(f"Segurando T para pegar ({where})...")
         try:
@@ -345,15 +348,20 @@ class Fisher:
                 # só considera que o aviso sumiu de verdade depois de várias checagens seguidas
                 lost = misses >= PROMPT_LOST_CHECKS and now - last_seen >= PROMPT_LOST_SEC
                 prompt_on = seen_any and not lost
-                blind = not seen_any and now - start >= PROMPT_GRACE_SEC
+                # às cegas se o aviso não está na tela e já passou a folga desde o início
+                # ou desde a última vez que soltou o T (senão travava depois de ver o aviso
+                # uma vez e ele sumir de vez: seen_any não voltava a False nunca).
+                blind = not prompt_on and now - max(start, released_at) >= PROMPT_GRACE_SEC
                 want = prompt_on or blind
                 held = now - hold_since
                 # Depois de apertar, segura pelo menos o tempo que o jogo pede: com a câmera longe o
                 # aviso vira um losango pequeno que o detector perde, mas ele continua na tela.
-                # Só então solta se o aviso sumiu (item balançou) ou se passou do tempo sem vir nada.
-                if holding and ((not want and held >= hold_need) or held > hold_need + HOLD_SLACK_SEC):
+                # Só solta de verdade quando o aviso realmente sumiu (não só o "às cegas" achando
+                # que talvez esteja) ou quando passou do tempo sem vir nada.
+                if holding and ((not prompt_on and held >= hold_need) or held > hold_need + HOLD_SLACK_SEC):
                     screen.release_key("t")
                     holding = False
+                    released_at = now
                     restarts += 1
                     log.debug("T solto %s (aviso na tela=%s, segurando há %.1fs)",
                               where, prompt_on, held)
