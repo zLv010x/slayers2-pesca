@@ -23,6 +23,7 @@ MUTED = ("#6b7280", "#9ca3af")
 CARD = ("#eef2f7", "#1f2937")
 OK = "#22c55e"
 BAD = "#ef4444"
+AMBER = "#d97706"
 # Rótulo na tela -> valor no config do auto relog
 RELOG_MODES = {"VIP (meu servidor)": "vip", "Servidor de outro": "nick"}
 CHIP_OFF = ("#d1d5db", "#2b3340")   # etiqueta fora do filtro: apagada
@@ -322,6 +323,9 @@ class SetupTab:
         self.relog_nick = ctk.CTkEntry(r, placeholder_text="nick exato (só para servidor de outro)")
         self.relog_nick.pack(side="left", fill="x", expand=True, padx=8)
         self.relog_nick.bind("<KeyRelease>", lambda _e: self._save_relog())
+        r = row(box)
+        ctk.CTkButton(r, text="Setar spawn agora", width=150, command=self.app.request_set_spawn).pack(side="left")
+        ctk.CTkLabel(r, text="fique no ponto de pesca", text_color=MUTED).pack(side="left", padx=6)
         self.relog_state = hint(box, "")
         hint(box, "Quando o jogo cai (menu ou 'Disconnected'): Reconnect → PLAY → Ouwland → servidor "
                   "privado (o seu com VIP, ou o do nick) → nasce no spawn setado e volta a pescar.")
@@ -336,6 +340,12 @@ class SetupTab:
             self.relog_nick.insert(0, rc["owner_nick"])
         self._show_relog_state()
 
+    def sync_relog(self) -> None:
+        """Atualiza a caixa "Já setei o spawn" depois que a macro setou sozinha."""
+        if self.app.cfg["relog"].get("spawn_set"):
+            self.relog_checks["spawn_set"].select()
+        self._show_relog_state()
+
     def _save_relog(self) -> None:
         rc = self.app.cfg["relog"]
         rc["enabled"] = bool(self.relog_on.get())
@@ -347,8 +357,12 @@ class SetupTab:
         self.app.save_soon()
 
     def _show_relog_state(self) -> None:
+        rc = self.app.cfg["relog"]
         reason = relog_bridge.not_ready_reason(self.app.cfg)
-        if reason is None:
+        if rc.get("enabled") and rc.get("has_spawn_gamepass") and not rc.get("spawn_set"):
+            self.relog_state.configure(text="Vai setar o spawn sozinho ao iniciar a pesca "
+                                            "(comece no ponto de pesca).", text_color=AMBER)
+        elif reason is None:
             self.relog_state.configure(text="✓ Pronto: se o jogo cair, reconecta sozinho.", text_color=OK)
         else:
             enabled = self.app.cfg["relog"].get("enabled")

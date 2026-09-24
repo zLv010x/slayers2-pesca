@@ -17,6 +17,7 @@ import numpy as np
 import logbook
 import relog
 import screen
+import spawn
 from stops import StopRun
 
 log = logbook.get()
@@ -70,6 +71,11 @@ class RelogActions:
 
     def status(self, msg: str) -> None:
         self.f.cb.status(msg)
+
+
+def set_spawn(f) -> spawn.SpawnResult:
+    """Seta o spawn (gamepass) onde o personagem está, pelos comandos do jogo."""
+    return spawn.Setter(RelogActions(f)).run()
 
 
 def not_ready_reason(cfg: dict) -> str | None:

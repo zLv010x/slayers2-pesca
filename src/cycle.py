@@ -25,6 +25,7 @@ import loot as loot_mod
 import prompt as prompt_mod
 import relog_bridge
 import screen
+import spawn
 import window
 from bar_control import TrackController
 from bar_detect import Detector
@@ -102,6 +103,8 @@ class Callbacks:
     loot: Callable[[list[loot_mod.Loot], np.ndarray | None], None]
     # (resumo das iscas, é aviso?)
     bait: Callable[[str, bool], None] = field(default=lambda text, warn: None)
+    # spawn setado (True) ou não deu (False): o app marca a caixa "Já setei o spawn"
+    spawn_set: Callable[[bool], None] = field(default=lambda ok: None)
 
 
 @dataclass(frozen=True)
@@ -122,6 +125,8 @@ class Fisher:
         self.bait_path = bait_path
         self.bait_check_requested = False
         self._bait_retry_at = 0
+        self.spawn_requested = False   # botão "Setar spawn agora"
+        self._spawn_tried = False      # automático: só uma tentativa por rodada
         self._no_bait_warned = False
         self._menu_stuck = False
         self.cfg = cfg
@@ -739,6 +744,7 @@ class Fisher:
         self.cycles += 1
         log.debug("---- ciclo %d ----", self.cycles)
         cycle_start = time.perf_counter()
+        self._set_spawn_if_needed()
         self._maybe_check_baits()
         self.ensure_rod()
         self.check_camera()
@@ -767,6 +773,27 @@ class Fisher:
         # só zera depois que o ciclo inteiro deu certo (senão um erro sempre no mesmo lugar
         # nunca deixa o contador passar de 1 e a macro nunca desiste de verdade)
         self.recoveries = 0
+
+    def _set_spawn_if_needed(self) -> None:
+        """Seta o spawn no ponto de pesca: a pedido (botão) ou sozinho, uma vez, quando o auto
+        relog está ligado, a pessoa tem o gamepass e ainda não setou (senão o relog nasceria longe)."""
+        r = self.cfg.get("relog", {})
+        auto = (r.get("enabled") and r.get("has_spawn_gamepass") and not r.get("spawn_set")
+                and not self._spawn_tried)
+        if not (self.spawn_requested or auto):
+            return
+        self.spawn_requested, self._spawn_tried = False, True
+        self.cb.status("Setando o spawn no ponto de pesca...")
+        result = relog_bridge.set_spawn(self)
+        if result.ok:
+            r["spawn_set"] = True
+            log.info("Spawn setado no ponto de pesca.")
+            self._notify("📍 Spawn setado no ponto de pesca (o auto relog volta para cá).", ping=False)
+        else:
+            log.warning("Não consegui setar o spawn: %s", result.reason)
+            self._notify(f"⚠️ Não consegui setar o spawn: {result.reason}. Sete na mão e marque "
+                         "'Já setei o spawn'.", ping=False)
+        self.cb.spawn_set(result.ok)
 
     def _log_stats(self) -> None:
         s = self.session

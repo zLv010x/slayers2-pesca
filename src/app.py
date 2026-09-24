@@ -67,6 +67,7 @@ class App(ctk.CTk):
         self.baits = BaitState.load(BAIT_FILE)
         self._fisher: Fisher | None = None
         self._bait_check_pending = False
+        self._spawn_pending = False
         self._posted: queue.SimpleQueue = queue.SimpleQueue()
         self.notifier = DiscordNotifier(on_error=lambda m: self.post(lambda: self.set_status(f"Discord: {m}")))
         self.apply_discord()
@@ -322,11 +323,14 @@ class App(ctk.CTk):
         self.overlay.set_clickthrough(True)  # pescando: nenhum clique da macro pode parar no overlay
         cb = Callbacks(status=lambda m: self.post(lambda: self.set_status(m)),
                        loot=lambda items, snap: self.post(lambda: self._on_loot(items, snap)),
-                       bait=lambda text, warn: self.post(lambda: self._show_bait(text, warn)))
+                       bait=lambda text, warn: self.post(lambda: self._show_bait(text, warn)),
+                       spawn_set=lambda ok: self.post(lambda: self._on_spawn_set(ok)))
         fisher = Fisher(copy.deepcopy(self.cfg), cb, self.session, self.notifier, self.compass, self.catalog,
                         baits=self.baits, bait_path=BAIT_FILE)
         fisher.bait_check_requested = self._bait_check_pending
         self._bait_check_pending = False
+        fisher.spawn_requested = self._spawn_pending
+        self._spawn_pending = False
         self._fisher = fisher
         self._worker = threading.Thread(target=self._run_worker, args=(fisher,), daemon=True)
         self._worker.start()
@@ -359,6 +363,22 @@ class App(ctk.CTk):
         else:
             self._bait_check_pending = True
             self.set_status("Vou conferir as iscas quando você iniciar a pesca.")
+
+    def request_set_spawn(self) -> None:
+        if self._running and self._fisher is not None:
+            self._fisher.spawn_requested = True
+            self.set_status("Vou setar o spawn no começo do próximo ciclo.")
+        else:
+            self._spawn_pending = True
+            self.set_status("Vou setar o spawn quando você iniciar a pesca (fique no ponto de pesca).")
+
+    def _on_spawn_set(self, ok: bool) -> None:
+        if ok:
+            self.cfg["relog"]["spawn_set"] = True
+            self.save_soon()
+        self.setup_tab.sync_relog()
+        self.set_status("Spawn setado no ponto de pesca." if ok else
+                        "Não consegui setar o spawn: veja o log e sete na mão.")
 
     def new_session(self) -> None:
         """Zera tempo e contagens (o CSV da sessão anterior continua salvo em logs/)."""

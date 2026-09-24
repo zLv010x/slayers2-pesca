@@ -141,3 +141,17 @@ def test_acoes_somam_a_origem_da_janela(monkeypatch):
     assert actions.grab() == (100, 50, frame)
     actions.click(10, 20)
     assert clicks == [(110, 70)]
+
+
+def test_set_spawn_usa_as_acoes_da_pesca(monkeypatch):
+    seen = []
+
+    class FakeSetter:
+        def __init__(self, actions):
+            seen.append(type(actions).__name__)
+
+        def run(self):
+            return relog_bridge.spawn.SpawnResult(True, "ok")
+    monkeypatch.setattr(relog_bridge.spawn, "Setter", FakeSetter)
+    assert relog_bridge.set_spawn(SimpleNamespace()).ok
+    assert seen == ["RelogActions"]

@@ -960,3 +960,53 @@ def test_bussola_sumida_um_quadro_nao_varre(auto_camera_env):
     f = auto_camera_env(compass)
     assert f._auto_fix_camera(tol=6, drift=None) is True
     assert compass.drags == []
+
+
+# ---------------------------------------------------------------- setar o spawn
+
+@pytest.fixture
+def spawn_env(monkeypatch):
+    calls, marked = [], []
+
+    def make(result_ok=True, **relog_over):
+        f = FakeFisher([])
+        f.cfg["relog"].update(relog_over)
+        f.cb.spawn_set = lambda ok: marked.append(ok)
+        f.notifier = FakeNotifier()
+        monkeypatch.setattr(cycle.relog_bridge, "set_spawn",
+                            lambda fisher: calls.append(True) or cycle.spawn.SpawnResult(result_ok, "x"))
+        return f
+    return make, calls, marked
+
+
+def test_seta_o_spawn_sozinho_uma_vez_quando_falta(spawn_env):
+    make, calls, marked = spawn_env
+    f = make(enabled=True, has_spawn_gamepass=True, spawn_set=False)
+    f._set_spawn_if_needed()
+    f._set_spawn_if_needed()
+    assert calls == [True] and marked == [True]
+    assert f.cfg["relog"]["spawn_set"] is True
+
+
+def test_falhou_nao_fica_tentando_a_cada_ciclo(spawn_env):
+    make, calls, marked = spawn_env
+    f = make(result_ok=False, enabled=True, has_spawn_gamepass=True, spawn_set=False)
+    f._set_spawn_if_needed()
+    f._set_spawn_if_needed()
+    assert calls == [True] and marked == [False]
+
+
+def test_sem_gamepass_ou_ja_setado_nao_mexe(spawn_env):
+    make, calls, _ = spawn_env
+    for over in (dict(enabled=True, has_spawn_gamepass=False), dict(enabled=True, has_spawn_gamepass=True,
+                                                                     spawn_set=True), dict(enabled=False)):
+        make(**over)._set_spawn_if_needed()
+    assert calls == []
+
+
+def test_pedido_pelo_botao_seta_mesmo_ja_setado(spawn_env):
+    make, calls, marked = spawn_env
+    f = make(enabled=False, has_spawn_gamepass=True, spawn_set=True)
+    f.spawn_requested = True
+    f._set_spawn_if_needed()
+    assert calls == [True] and marked == [True] and f.spawn_requested is False
