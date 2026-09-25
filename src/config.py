@@ -97,6 +97,7 @@ DEFAULTS: dict = {
     "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True,
            "overlay": True, "overlay_pos": None,
            "show_in_capture": False},  # aparecer no Parsec/OBS (a macro se apaga dos próprios prints)
+    "diagnostic": False,   # log detalhado + prints dos problemas (deixa a macro mais pesada)
     "config_rev": 3,
 }
 CONFIG_REV = DEFAULTS["config_rev"]

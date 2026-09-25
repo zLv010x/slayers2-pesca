@@ -17,19 +17,22 @@ import cv2
 import numpy as np
 
 LOG_NAME = "pesca"
-MAX_BYTES = 5 * 1024 * 1024
-BACKUPS = 5
+MAX_BYTES = 2 * 1024 * 1024
+BACKUPS = 2
 MAX_EVIDENCE = 200
 FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s %(module)s: %(message)s"
 DATEFMT = "%Y-%m-%d %H:%M:%S"
 
 _evidence_dir: Path | None = None
+_handler: logging.Handler | None = None
+# Modo diagnóstico: log detalhado (DEBUG) e prints dos problemas. Desligado a macro fica mais leve.
+_diagnostic = False
 _lock = threading.Lock()
 
 
 def setup(log_dir: Path) -> logging.Logger:
     """Liga o log em arquivo (com rotação) e captura erros não tratados."""
-    global _evidence_dir
+    global _evidence_dir, _handler
     log_dir.mkdir(parents=True, exist_ok=True)
     _evidence_dir = log_dir / "evidencias"
     logger = logging.getLogger(LOG_NAME)
@@ -37,8 +40,10 @@ def setup(log_dir: Path) -> logging.Logger:
         handler = RotatingFileHandler(log_dir / "macro.log", maxBytes=MAX_BYTES,
                                       backupCount=BACKUPS, encoding="utf-8")
         handler.setFormatter(logging.Formatter(FORMAT, DATEFMT))
+        handler.setLevel(logging.DEBUG if _diagnostic else logging.INFO)
         logger.addHandler(handler)
         logger.setLevel(logging.DEBUG)
+        _handler = handler
 
     def excepthook(exc_type, exc, tb):
         logger.critical("Erro não tratado", exc_info=(exc_type, exc, tb))
@@ -67,9 +72,17 @@ def _save_png(folder: Path, img: np.ndarray, reason: str, keep: int) -> Path:
     return path
 
 
+def set_diagnostic(on: bool) -> None:
+    """Liga/desliga o log detalhado e os prints dos problemas."""
+    global _diagnostic
+    _diagnostic = bool(on)
+    if _handler is not None:
+        _handler.setLevel(logging.DEBUG if _diagnostic else logging.INFO)
+
+
 def save_evidence(img: np.ndarray | None, reason: str) -> Path | None:
-    """Salva um print do jogo para investigar depois. Nunca derruba a macro."""
-    if img is None or _evidence_dir is None:
+    """Salva um print do jogo para investigar depois (só no modo diagnóstico). Nunca derruba a macro."""
+    if img is None or _evidence_dir is None or not _diagnostic:
         return None
     try:
         path = _save_png(_evidence_dir, img, reason, MAX_EVIDENCE)

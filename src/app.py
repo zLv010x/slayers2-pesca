@@ -68,6 +68,8 @@ class App(ctk.CTk):
         self.minsize(440, 640)
 
         self.cfg = config.load()
+        logbook.set_diagnostic(bool(self.cfg.get("diagnostic", False)))
+        self._label_text: dict[int, str] = {}
         self.session = Session.load(config.LOG_DIR, SESSION_FILE)  # continua a de antes de fechar
         self.compass = CompassLock()
         self.compass.load(COMPASS_FILE)
@@ -349,12 +351,18 @@ class App(ctk.CTk):
     def _refresh_stats(self) -> None:
         s = self.session
         tracked = self.cfg["discord"].get("tracked_item", "").strip()
-        self.stat_labels["Tempo"].configure(text=s.elapsed_text() if s.elapsed_seconds() >= 1 else "-")
-        self.stat_labels["Itens"].configure(text=str(s.catches))
-        self._tracked_title.configure(text=tracked or "Item")
-        self.stat_labels["tracked"].configure(text=str(s.total_of(tracked)) if tracked else "-")
-        self.stat_labels["Perdidos"].configure(text=str(s.misses))
+        self._set_text(self.stat_labels["Tempo"], s.elapsed_text() if s.elapsed_seconds() >= 1 else "-")
+        self._set_text(self.stat_labels["Itens"], str(s.catches))
+        self._set_text(self._tracked_title, tracked or "Item")
+        self._set_text(self.stat_labels["tracked"], str(s.total_of(tracked)) if tracked else "-")
+        self._set_text(self.stat_labels["Perdidos"], str(s.misses))
         self.session_tab.refresh()
+
+    def _set_text(self, label, text: str) -> None:
+        """Só redesenha se o texto mudou (roda a cada segundo: redesenhar à toa pesa)."""
+        if self._label_text.get(id(label)) != text:
+            self._label_text[id(label)] = text
+            label.configure(text=text)
 
     # ------------------------------------------------------------ pesca
     def toggle_run(self, by_user: bool = True) -> None:

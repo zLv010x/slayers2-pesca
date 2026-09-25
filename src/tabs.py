@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Callable
 
 import customtkinter as ctk
 
+import logbook
 import webhook
 
 if TYPE_CHECKING:
@@ -100,7 +101,7 @@ class SessionTab:
         for rarity in RARITY_ORDER:
             chip = ctk.CTkButton(chips, text="0", height=26, width=40, corner_radius=13,
                                  fg_color=RARITY_HEX[rarity], hover_color=RARITY_HEX[rarity],
-                                 text_color="white", font=ctk.CTkFont(size=11, weight="bold"),
+                                 text_color="white", font=ctk.CTkFont(size=10, weight="bold"),
                                  command=lambda r=rarity: self.toggle_filter(r))
             chip.pack(side="left", expand=True, fill="x", padx=2)
             self.chips[rarity] = chip
@@ -122,8 +123,14 @@ class SessionTab:
                       command=app.new_session).pack(side="right")
         if app.cfg["ui"].get("show_recent", True):
             self.show_recent.select()
-        self.recent = ctk.CTkScrollableFrame(parent, fg_color=CARD, corner_radius=10, height=170)
-        self._rows: list[ctk.CTkFrame] = []
+        # Uma caixa de texto só (recriar 50 linhas de widgets travava a janela ~2,4 s por item)
+        self.recent = ctk.CTkTextbox(parent, fg_color=CARD, corner_radius=10, height=170, wrap="none",
+                                     font=ctk.CTkFont(size=12))
+        for rarity, color in RARITY_HEX.items():
+            self.recent.tag_config(rarity, foreground=color)
+        self.recent.tag_config("muted", foreground=MUTED[1])
+        self.recent.configure(state="disabled")
+        self._chip_state: tuple | None = None
         self._shown = 0
         self._toggle_recent(save=False)
         self.refresh()
@@ -138,6 +145,14 @@ class SessionTab:
             self.app.cfg["ui"]["show_recent"] = on
             self.app.save_soon()
 
+    def _empty_text(self, visible: set[str]) -> str:
+        if not visible:
+            return "Todas as raridades desligadas: clique numa etiqueta para mostrar."
+        if self.hidden:
+            chosen = ", ".join(webhook.RARITY_LABELS[r] for r in RARITY_ORDER if r in visible)
+            return f"Nenhum item {chosen} nesta sessão."
+        return "Nada ainda."
+
     def toggle_filter(self, rarity: str) -> None:
         self.hidden ^= {rarity}
         self._shown = -1  # força redesenhar a lista
@@ -145,6 +160,10 @@ class SessionTab:
 
     def _paint_chips(self) -> None:
         s = self.app.session
+        state = tuple((r, s.rarities.get(r, 0), r in self.hidden) for r in RARITY_ORDER)
+        if state == self._chip_state:
+            return  # nada mudou: redesenhar à toa pesa (roda a cada segundo)
+        self._chip_state = state
         for rarity, chip in self.chips.items():
             on = rarity not in self.hidden
             color = RARITY_HEX[rarity]
@@ -158,29 +177,19 @@ class SessionTab:
         if self._shown == s.catches:
             return
         self._shown = s.catches
-        for r in self._rows:
-            r.destroy()
-        self._rows = []
+        self._chip_state = None  # etiqueta clicada: repinta
         visible = {r for r in RARITY_ORDER if r not in self.hidden}
         rows = s.recent(visible if self.hidden else None, RECENT_ROWS)
+        box = self.recent
+        box.configure(state="normal")
+        box.delete("1.0", "end")
         if not rows:
-            if not visible:
-                text = "Todas as raridades desligadas: clique numa etiqueta para mostrar."
-            elif self.hidden:
-                chosen = ", ".join(webhook.RARITY_LABELS[r] for r in RARITY_ORDER if r in visible)
-                text = f"Nenhum item {chosen} nesta sessão."
-            else:
-                text = "Nada ainda."
-            empty = ctk.CTkLabel(self.recent, text_color=MUTED, text=text)
-            empty.pack(pady=8)
-            self._rows.append(empty)
+            box.insert("end", self._empty_text(visible), "muted")
         for hora, name, qty, rarity in rows:
-            line = ctk.CTkFrame(self.recent, fg_color="transparent")
-            line.pack(fill="x", pady=1)
-            ctk.CTkLabel(line, text="●", text_color=RARITY_HEX.get(rarity, "#9aa0a6"), width=14).pack(side="left")
-            ctk.CTkLabel(line, text=f"{name}  x{qty}", anchor="w").pack(side="left", padx=4)
-            ctk.CTkLabel(line, text=hora, text_color=MUTED).pack(side="right", padx=4)
-            self._rows.append(line)
+            box.insert("end", f"{hora}   ", "muted")
+            box.insert("end", "● ", rarity if rarity in RARITY_HEX else "common")
+            box.insert("end", f"{name}  x{qty}\n")
+        box.configure(state="disabled")
 
     def reset(self) -> None:
         self._shown = -1
@@ -462,4 +471,19 @@ class AdvancedTab:
                 cast = int if group == "limits" else float
                 app.number_entry(r, app.cfg[group], key, width=70, cast=cast).pack(side="right")
                 hint(box, tip)
+        box = section(scroll, "Diagnóstico")
+        r = row(box)
+        self.app = app
+        self.diagnostic = ctk.CTkSwitch(r, text="Modo diagnóstico (log detalhado e prints dos problemas)",
+                                        command=self._save_diagnostic)
+        self.diagnostic.pack(side="left")
+        if app.cfg.get("diagnostic", False):
+            self.diagnostic.select()
+        hint(box, "Deixa a macro mais pesada: ligue só quando for investigar um problema. Os prints "
+                  "ficam em logs/evidencias.")
         ctk.CTkButton(scroll, text="Restaurar padrões", fg_color="#374151", command=on_reset).pack(pady=10)
+
+    def _save_diagnostic(self) -> None:
+        self.app.cfg["diagnostic"] = bool(self.diagnostic.get())
+        logbook.set_diagnostic(self.app.cfg["diagnostic"])
+        self.app.save_soon()

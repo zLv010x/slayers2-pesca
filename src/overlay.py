@@ -43,6 +43,15 @@ class Line(NamedTuple):
     value: int | None = None  # quanto vale vender (quantidade x preço da ficha)
 
 
+def _shape(line: Line) -> tuple:
+    return line.style, line.qty is not None, line.value is not None
+
+
+def same_shape(a: list[Line], b: list[Line]) -> bool:
+    """Mesmas linhas no mesmo lugar (só texto/números diferentes): dá para só trocar o texto."""
+    return len(a) == len(b) and all(_shape(x) == _shape(y) for x, y in zip(a, b))
+
+
 def money(value: int) -> str:
     return f"{value:,}".replace(",", ".")
 
@@ -176,15 +185,30 @@ class Overlay(tk.Toplevel):
 
     # ------------------------------------------------------------ conteúdo
     def refresh(self, lines: list[Line]) -> None:
+        """Mesmas linhas com outro texto (o relógio muda todo segundo): só troca o texto. Recriar
+        tudo levava ~120 ms a cada segundo; só recria quando aparece/some uma linha."""
         if lines == self._lines:
+            return
+        if self._lines is not None and same_shape(self._lines, lines):
+            for i, (old, new) in enumerate(zip(self._lines, lines)):
+                if old != new:
+                    self._update_line(i, new)
+            self._lines = lines
             return
         self._lines = lines
         for child in self._body.winfo_children():
             child.destroy()
-        for row, line in enumerate(lines):
-            self._add_line(row, line)
+        self._cells = [self._add_line(row, line) for row, line in enumerate(lines)]
 
-    def _add_line(self, row: int, line: Line) -> None:
+    def _update_line(self, row: int, line: Line) -> None:
+        label, qty, value = self._cells[row]
+        label.configure(text=line.text)
+        if qty is not None:
+            qty.configure(text=str(line.qty))
+        if value is not None:
+            value.configure(text=money(line.value))
+
+    def _add_line(self, row: int, line: Line) -> tuple:
         styles = {
             "title": (FONT_TITLE, FG, 0), "head": (FONT_BOLD, HEAD, 4),
             "row": (FONT, FG, 0), "more": (FONT, MUTED, 0), "empty": (FONT, MUTED, 2),
@@ -198,12 +222,16 @@ class Overlay(tk.Toplevel):
         self._bind_drag(label)
         cells = ((1, str(line.qty) if line.qty is not None else None, QTY),
                  (2, money(line.value) if line.value is not None else None, MONEY))
+        made = []
         for column, text, fg in cells:
             if text is None:
+                made.append(None)
                 continue
             cell = tk.Label(self._body, text=text, font=FONT_BOLD, fg=fg, bg=BG, anchor="e")
             cell.grid(row=row, column=column, sticky="e", padx=(12, 0), pady=(top, 0))
             self._bind_drag(cell)
+            made.append(cell)
+        return (label, made[0], made[1])
 
     # ------------------------------------------------------------ lugar
     def follow(self) -> None:
