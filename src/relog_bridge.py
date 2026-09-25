@@ -205,6 +205,7 @@ def _reconnect(f, what: str) -> bool:
         log.info("Reconectado: voltando a pescar.")
         f._notify("✅ Reconectado: voltando a pescar.", ping=False)
         f.recoveries = 0
+        f.after_relog = True  # se nem assim pegar peixe, o spawn está longe da água
         return True
     if result.reason == "codigo_sem_reconexao":
         _stop_for_good(f, f"{what}; esse código não reconecta sozinho")

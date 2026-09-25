@@ -1074,3 +1074,37 @@ def test_toda_espera_da_pesca_da_sinal_de_vida_ao_cao_de_guarda():
     f.on_beat = lambda: beats.append(1)
     f.sleep(0.05)
     assert len(beats) >= 2
+
+
+def _only_fails_casting(f):
+    for name in ("_set_spawn_if_needed", "_maybe_check_baits", "ensure_rod", "check_camera", "cast"):
+        setattr(f, name, lambda: None)
+    f.minigame = lambda: False
+    f._notify = lambda text, ping=True: f.notified.append(text)
+    f.notified = []
+
+
+def test_depois_do_relog_sem_peixe_para_e_avisa_do_spawn():
+    """Ewerton 25/09: spawn setado longe da água; depois do relog lançou 40x sem peixe (8
+    recuperações). Sem nenhum peixe desde o relog, 5 lançamentos vazios = nasceu longe da água."""
+    f = FakeFisher([True])
+    _only_fails_casting(f)
+    f.after_relog = True
+    limit = int(f.cfg["limits"]["max_failed_casts"])
+    for _ in range(limit - 1):
+        f.one_cycle()
+    with pytest.raises(cycle.StopRun) as exc:
+        f.one_cycle()
+    assert "spawn" in str(exc.value) and f.stop_for_good
+    assert any("spawn" in t for t in f.notified)
+
+
+def test_sem_relog_continua_sendo_uma_recuperacao_comum():
+    f = FakeFisher([True])
+    _only_fails_casting(f)
+    limit = int(f.cfg["limits"]["max_failed_casts"])
+    for _ in range(limit - 1):
+        f.one_cycle()
+    with pytest.raises(cycle.Recoverable):
+        f.one_cycle()
+    assert not f.stop_for_good

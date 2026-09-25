@@ -150,6 +150,7 @@ class Fisher:
         self.cycles = 0
         self.relog_budget = RestartPolicy()  # reconexões na última hora
         self.stop_for_good = False  # parada em que reiniciar sozinho não adianta (menu principal)
+        self.after_relog = False    # reconectou e ainda não pegou nenhum peixe desde então
         self._last_status = ""
         self._status_cb = cb.status
         cb.status = self._status
@@ -777,12 +778,15 @@ class Fisher:
             self.cb.status(f"Nenhum peixe mordeu ({self.failed_casts}/{limit}). Tentando de novo...")
             if self.failed_casts >= limit:
                 self.failed_casts = 0
+                if self.after_relog:
+                    self._stop_far_from_water()
                 _, img = self.frame()
                 raise Recoverable(f"{limit} lançamentos seguidos sem minigame (caiu na água? vara presa?)", img)
             return
         self.failed_casts = 0
         self.collect()
         self._fished_ok = True
+        self.after_relog = False
         if self._baits_on():
             # o jogo gasta 1 isca a cada mordida resolvida (pegando ou não)
             spent = self.baits.consume(time.perf_counter() - cycle_start, self.cfg["baits"]["infinite"])
@@ -796,6 +800,16 @@ class Fisher:
         # só zera depois que o ciclo inteiro deu certo (senão um erro sempre no mesmo lugar
         # nunca deixa o contador passar de 1 e a macro nunca desiste de verdade)
         self.recoveries = 0
+
+    def _stop_far_from_water(self) -> None:
+        """Reconectou e nenhum lançamento pegou peixe: nasceu longe da água (spawn setado no lugar
+        errado). Recuperar não adianta; para e avisa (Ewerton 25/09: 40 lançamentos vazios)."""
+        msg = ("depois de reconectar, nenhum lançamento pegou peixe: o personagem nasceu longe da água. "
+               "Sete o spawn no ponto de pesca (aba Relog)")
+        log.error(msg)
+        self._notify(f"🛑 {msg}.")
+        self.stop_for_good = True
+        raise StopRun("Parei: " + msg + ".")
 
     def _set_spawn_if_needed(self) -> None:
         """Seta o spawn no ponto de pesca: a pedido (botão) ou sozinho, uma vez, quando o auto
