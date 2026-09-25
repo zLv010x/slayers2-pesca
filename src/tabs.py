@@ -152,7 +152,7 @@ class SessionTab:
         if not visible:
             return _("Todas as raridades desligadas: clique numa etiqueta para mostrar.")
         if self.hidden:
-            chosen = ", ".join(webhook.RARITY_LABELS[r] for r in RARITY_ORDER if r in visible)
+            chosen = ", ".join(webhook.rarity_label(r) for r in RARITY_ORDER if r in visible)
             return _("Nenhum item {chosen} nesta sessão.", chosen=chosen)
         return _("Nada ainda.")
 
@@ -170,7 +170,7 @@ class SessionTab:
         for rarity, chip in self.chips.items():
             on = rarity not in self.hidden
             color = RARITY_HEX[rarity]
-            chip.configure(text=f"{webhook.RARITY_LABELS[rarity]} {s.rarities.get(rarity, 0)}",
+            chip.configure(text=f"{webhook.rarity_label(rarity)} {s.rarities.get(rarity, 0)}",
                            fg_color=color if on else CHIP_OFF, hover_color=color,
                            text_color="white" if on else color)
 
@@ -379,7 +379,7 @@ class SetupTab:
         r = row(box)
         short = {"legendary": "Legend."}  # a linha inteira precisa caber na janela
         for rarity in RARITY_ORDER:
-            cb = ctk.CTkCheckBox(r, text=short.get(rarity, webhook.RARITY_LABELS[rarity]), width=20,
+            cb = ctk.CTkCheckBox(r, text=short.get(rarity, webhook.rarity_label(rarity)), width=20,
                                  checkbox_width=16,
                                  checkbox_height=16, text_color=RARITY_HEX[rarity],
                                  command=self._save_overlay_filter)
@@ -438,7 +438,7 @@ class DiscordTab:
         ctk.CTkLabel(r, text=_("Marcar em:")).pack(side="left")
         self.ping: dict[str, ctk.CTkCheckBox] = {}
         for rarity in ("mythic", "legendary", "epic"):
-            cb = ctk.CTkCheckBox(r, text=webhook.RARITY_LABELS[rarity], width=20, command=self._save,
+            cb = ctk.CTkCheckBox(r, text=webhook.rarity_label(rarity), width=20, command=self._save,
                                  fg_color=RARITY_HEX[rarity], hover_color=RARITY_HEX[rarity])
             cb.pack(side="left", padx=6)
             if rarity in d["ping_rarities"]:

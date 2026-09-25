@@ -96,3 +96,15 @@ def test_pilula_nao_muda_quando_nao_esta_pescando():
     app.App.set_status(fake, "Pausado: qualquer coisa.")
     assert calls["status"] == [{"text": "Pausado: qualquer coisa."}]
     assert calls["pill"] == []
+
+
+
+def test_raridade_comum_em_ingles():
+    import i18n
+    import webhook
+    i18n.set_language("en")
+    try:
+        assert webhook.rarity_label("common") == "Common" and webhook.rarity_label("mythic") == "Mythic"
+    finally:
+        i18n.set_language("pt")
+    assert webhook.rarity_label("common") == "Comum"

@@ -34,6 +34,7 @@ def _(text_pt: str, **fmt) -> str:
 # Dicionario pt -> en. Chave = texto exatamente como escrito no codigo-fonte
 # (antes de qualquer `.format`), incluindo os campos `{assim}`.
 EN: dict[str, str] = {
+    "Comum": "Common",
     '\nClique para marcar  •  Esc cancela': '\nClick to mark  •  Esc cancels',
     '  •  bússola ✓': '  •  compass ✓',
     '  •  bússola ✗': '  •  compass ✗',

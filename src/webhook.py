@@ -39,6 +39,13 @@ RARITY_LABELS = {
     "legendary": "Legendary",
     "mythic": "Mythic",
 }
+
+
+def rarity_label(rarity: str) -> str:
+    """Nome da raridade no idioma da macro ("Comum" vira "Common" em inglês)."""
+    return i18n._(RARITY_LABELS.get(rarity, rarity))
+
+
 MAX_RETRIES = 3
 TIMEOUT_SEC = 15
 USER_AGENT = "slayers2-pesca (webhook)"
@@ -75,7 +82,7 @@ class LootReport:
 def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], when: datetime) -> dict:
     rarity = report.rarity if report.rarity in RARITY_COLORS else "common"
     fields = [
-        {"name": i18n._("Raridade"), "value": RARITY_LABELS[rarity], "inline": True},
+        {"name": i18n._("Raridade"), "value": rarity_label(rarity), "inline": True},
         {"name": i18n._("Deste item na sessão"), "value": str(report.item_total), "inline": True},
         {"name": i18n._("Itens na sessão"), "value": str(report.session_count), "inline": True},
     ]
@@ -101,7 +108,7 @@ def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], whe
     payload = {"embeds": [embed], "allowed_mentions": {"parse": []}}
     if rarity in ping_rarities and valid_user_id(user_id):
         uid = user_id.strip()
-        payload["content"] = i18n._("<@{uid}> pegou um **{rarity}**!", uid=uid, rarity=RARITY_LABELS[rarity].upper())
+        payload["content"] = i18n._("<@{uid}> pegou um **{rarity}**!", uid=uid, rarity=rarity_label(rarity).upper())
         payload["allowed_mentions"] = {"users": [uid]}
     return payload
 
