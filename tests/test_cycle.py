@@ -1064,3 +1064,13 @@ def test_discord_recebe_nome_raridade_e_imagem_da_ficha_do_catalogo(tmp_path, mo
     assert (report.name, report.rarity) == ("Lost Cape", "mythic")
     assert report.image.shape == (30, 90, 3) and int(report.image[0, 0, 0]) == 77  # imagem da ficha
     assert shown[0].shape == (30, 90, 3)  # a janela da macro mostra a mesma imagem
+
+
+
+def test_toda_espera_da_pesca_da_sinal_de_vida_ao_cao_de_guarda():
+    """Pausas (bússola, Roblox fora da frente) também batem: só travamento de verdade fica mudo."""
+    beats = []
+    f = FakeFisher([True])
+    f.on_beat = lambda: beats.append(1)
+    f.sleep(0.05)
+    assert len(beats) >= 2

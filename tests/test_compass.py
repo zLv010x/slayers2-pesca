@@ -63,3 +63,34 @@ def test_salva_e_carrega_com_o_tamanho(tmp_path, shot):
     assert back.load(tmp_path / "b.npz")
     small = cv2.resize(frame, None, fx=0.7, fy=0.7, interpolation=cv2.INTER_AREA)
     assert abs(back.drift_px(small)) <= 3
+
+
+# ---------------------------------------------------------------- janela mudou de tamanho (25/09)
+def _fixture(name):
+    import cv2
+    from pathlib import Path
+    return cv2.imread(str(Path(__file__).parent / "fixtures" / name))
+
+
+def test_marcado_em_1280_acha_a_bussola_com_a_janela_em_2560():
+    """Noite de 24/09: ponto marcado com o Roblox em 1280x953 (Parsec mudou a resolução) e a
+    janela voltou para 2560x1369. A bússola do Roblox tem tamanho FIXO em pixels (N-E = 99 px
+    nas duas); a macro aumentava 2x a referência e ficou 1 hora pausada "bússola não encontrada"."""
+    c = CompassLock()
+    c.capture(_fixture("bussola_janela_1280x953.webp"))
+    drift = c.drift_px(_fixture("bussola_janela_2560x1369.webp"))
+    assert drift is not None and abs(drift) <= 4
+
+
+def test_marcado_em_2560_acha_a_bussola_com_a_janela_em_1280():
+    c = CompassLock()
+    c.capture(_fixture("bussola_janela_2560x1369.webp"))
+    drift = c.drift_px(_fixture("bussola_janela_1280x953.webp"))
+    assert drift is not None and abs(drift) <= 4
+
+
+def test_janela_do_mesmo_tamanho_continua_igual():
+    frame = _fixture("bussola_janela_2560x1369.webp")
+    c = CompassLock()
+    c.capture(frame)
+    assert c.drift_px(frame) == 0

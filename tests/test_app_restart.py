@@ -70,7 +70,8 @@ def test_fechar_com_a_pesca_travada_solta_t_e_mouse(monkeypatch):
     monkeypatch.setattr(app.screen.MouseButton, "release", lambda self: released.append("mouse"))
     monkeypatch.setattr(app.keyboard, "unhook_all_hotkeys", lambda: None)
     fake = SimpleNamespace(_worker=StuckWorker(), _stop=threading.Event(),
-                           _cancel_auto_restart=lambda: None, _save_now=lambda: None, destroy=lambda: None)
+                           _cancel_auto_restart=lambda: None, _save_now=lambda: None, destroy=lambda: None,
+                           pulse=SimpleNamespace(close=lambda: None))
     app.App.close(fake)
     assert fake._stop.is_set()
     assert released == ["t", "mouse"]

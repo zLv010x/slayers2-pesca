@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import os
+import sys
 import queue
 import threading
 import tkinter as tk
@@ -16,6 +17,7 @@ from PIL import Image
 
 import capture_mode
 import config
+import watchdog
 import logbook
 import overlay
 import screen
@@ -42,6 +44,7 @@ PUMP_MS = 30
 TICK_MS = 1000
 FOCUS_DELAY_MS = 350
 MINIMIZE_DELAY_MS = 150
+RESUME_DELAY_MS = 6000  # reaberta pelo cão de guarda: espera a janela e o Roblox
 WARN_COVER_DELAY_MS = 1500  # depois de o Roblox vir para a frente
 CLOSE_WAIT_SEC = 3.0
 # Reinício automático na hora em que você marca ponto/atalho: tenta de novo depois disso.
@@ -70,6 +73,10 @@ class App(ctk.CTk):
         self.compass.load(COMPASS_FILE)
         self.catalog = Catalog(config.CATALOG_DIR, config.CATALOG_LOCAL_DIR)
         self._tidy_catalog()
+        # sinal de vida para o cão de guarda (reabre a macro se ela travar pescando)
+        self.pulse = watchdog.Pulse(config.LOG_DIR / watchdog.PULSE_NAME, os.getpid(),
+                                    dump_path=config.LOG_DIR / watchdog.DUMP_NAME)
+        self.pulse.set_fishing(False)
         self._prices = self.catalog.prices()  # valor dos peixes no overlay (fichas do catálogo)
         self.baits = BaitState.load(BAIT_FILE)
         self._fisher: Fisher | None = None
@@ -380,6 +387,8 @@ class App(ctk.CTk):
         fisher.spawn_auto_allowed = by_user  # reinício sozinho nunca seta o spawn
         self._spawn_pending = False
         self._fisher = fisher
+        fisher.on_beat = self.pulse.beat
+        self.pulse.set_fishing(True)
         self._worker = threading.Thread(target=self._run_worker, args=(fisher,), daemon=True)
         self._worker.start()
         if self.cfg["ui"].get("minimize_on_start", True):
@@ -444,6 +453,7 @@ class App(ctk.CTk):
 
     def _on_stopped(self, reason: str) -> None:
         self._running = False
+        self.pulse.set_fishing(False)
         if self._minimized_by_run:
             self._minimized_by_run = False
             self._restore_window()
@@ -654,9 +664,17 @@ class App(ctk.CTk):
                                       CLOSE_WAIT_SEC)
                 screen.release_key("t")
                 screen.MouseButton().release()
+        self.pulse.close()  # fechou de propósito: o cão de guarda sai (antes de qualquer coisa falhar)
         keyboard.unhook_all_hotkeys()
         self._save_now()
         self.destroy()
+
+    def resume_after_hang(self) -> None:
+        """Aberta pelo cão de guarda depois de travar pescando: avisa e volta a pescar."""
+        logbook.get().warning("Reaberta pelo cão de guarda (a macro travou pescando): voltando a pescar.")
+        if self.cfg["discord"].get("notify_problems", True):
+            self.notifier.send_text("🔄 A macro travou e foi reaberta sozinha. Voltando a pescar.")
+        self.toggle_run(by_user=False)
 
 
 def main() -> None:
@@ -665,7 +683,14 @@ def main() -> None:
     window.ensure_dpi_awareness()
     window.set_app_id(APP_ID)
     threading.Thread(target=shortcut.ensure, args=(config.ROOT,), daemon=True).start()
-    App().mainloop()
+    app = App()
+    try:
+        watchdog.start_guard(os.getpid())
+    except OSError:
+        log.exception("Não consegui abrir o cão de guarda")
+    if watchdog.wants_resume(sys.argv):
+        app.after(RESUME_DELAY_MS, app.resume_after_hang)
+    app.mainloop()
     log.info("Macro fechada.")
 
 

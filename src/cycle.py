@@ -146,6 +146,7 @@ class Fisher:
         self._stop = threading.Event()
         self.failed_casts = 0
         self.recoveries = 0
+        self.on_beat: Callable[[], None] = lambda: None  # sinal de vida p/ o cão de guarda
         self.cycles = 0
         self.relog_budget = RestartPolicy()  # reconexões na última hora
         self.stop_for_good = False  # parada em que reiniciar sozinho não adianta (menu principal)
@@ -164,6 +165,7 @@ class Fisher:
         return float(self.cfg["timings"][key])
 
     def _check_stop(self) -> None:
+        self.on_beat()  # toda volta da pesca passa aqui: sinal de vida para o cão de guarda
         if self._stop.is_set():
             raise StopRun()
 

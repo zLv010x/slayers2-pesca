@@ -67,24 +67,49 @@ class CompassLock:
     def drift_px(self, frame: np.ndarray) -> int | None:
         """Quantos pixels a bússola andou desde a marcação (None = não achou).
 
-        Se a janela do Roblox mudou de tamanho, a referência é redimensionada junto
-        (e o resultado volta na escala da marcação, para a tolerância valer igual).
+        A bússola fica sempre no centro da tela e, no Roblox, tem tamanho FIXO em pixels
+        (medido em 24/09: N-E = 99 px com a janela em 1280x953 e em 2560x1369). Se a janela
+        mudou de tamanho, procura a referência no tamanho original e, por garantia, também
+        redimensionada pela largura/altura (outra interface poderia escalar); fica a melhor.
+        A posição é medida a partir do centro e volta na escala da marcação.
         """
         if self._template is None:
             return None
         strip = _strip(frame)
-        template, home_x, scale = self._template, self._home_x, 1.0
-        if self._strip_size and strip.shape[:2] != self._strip_size:
-            scale = strip.shape[1] / self._strip_size[1]
-            ry = strip.shape[0] / self._strip_size[0]
+        best = None
+        for scale in self._scales(strip.shape[:2]):
+            template = self._scaled_template(scale, strip.shape)
+            if template is None:
+                continue
+            _, score, _, loc = cv2.minMaxLoc(cv2.matchTemplate(strip, template, cv2.TM_CCOEFF_NORMED))
+            if best is None or score > best[0]:
+                best = (score, loc[0], template.shape[1], scale)
+        if best is None or best[0] < MIN_MATCH:
+            return None
+        _, x, tw, scale = best
+        return int(round((x - self._expected_left(strip.shape[1], tw, scale)) / scale))
+
+    def _scales(self, strip_size: tuple[int, int]) -> list[float]:
+        if not self._strip_size or strip_size == self._strip_size:
+            return [1.0]
+        ry = strip_size[0] / self._strip_size[0]
+        rx = strip_size[1] / self._strip_size[1]
+        return list(dict.fromkeys(round(s, 3) for s in (1.0, rx, ry)))
+
+    def _scaled_template(self, scale: float, strip_shape: tuple[int, ...]) -> np.ndarray | None:
+        template = self._template
+        if scale != 1.0:
             th, tw = template.shape
-            template = cv2.resize(template, (max(1, round(tw * scale)), max(1, round(th * ry))),
+            template = cv2.resize(template, (max(1, round(tw * scale)), max(1, round(th * scale))),
                                   interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR)
-            home_x = self._home_x * scale
-        if strip.shape[0] < template.shape[0] or strip.shape[1] < template.shape[1]:
+        template = template[:strip_shape[0]]  # faixa mais baixa: as letras ficam no alto dela
+        if template.shape[1] > strip_shape[1]:
             return None
-        res = cv2.matchTemplate(strip, template, cv2.TM_CCOEFF_NORMED)
-        _, score, _, loc = cv2.minMaxLoc(res)
-        if score < MIN_MATCH:
-            return None
-        return int(round((loc[0] - home_x) / scale))
+        return template
+
+    def _expected_left(self, strip_w: int, tw: int, scale: float) -> float:
+        """Onde a referência fica sem giro: mesma distância do centro que na marcação."""
+        cal_w = self._strip_size[1] if self._strip_size else strip_w
+        cal_tw = self._template.shape[1]
+        offset = self._home_x + cal_tw / 2 - cal_w / 2
+        return strip_w / 2 + offset * scale - tw / 2

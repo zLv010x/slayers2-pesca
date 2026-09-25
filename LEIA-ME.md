@@ -53,6 +53,9 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
 - **Item acompanhado** (aba Discord, padrão "Ore"): total só desse item na sessão (o Ore mythic;
   Refinement Ore é outro item), mostrado na janela e em todo aviso do Discord.
 - Registra tudo em `logs/macro.log` e salva um print em `logs/evidencias/` quando algo dá errado.
+- **Cão de guarda**: se a macro travar pescando (ficar 5 min sem sinal de vida), ele fecha e abre a macro
+  de novo sozinho, volta a pescar e avisa no Discord (no máximo 3 vezes por hora). Onde ela estava parada
+  fica em `logs/travamento.txt`; o que o cão de guarda fez, em `logs/cao-de-guarda.log`.
 - Não deixa o PC dormir nem a tela apagar enquanto está pescando.
 - Guarda tudo o que pegou em `logs/sessao-*.csv`.
 - Usa um **catálogo de itens** para saber se um item já é conhecido, corrigir erros de leitura
