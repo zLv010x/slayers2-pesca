@@ -816,6 +816,8 @@ class Fisher:
             self._notify("📍 Spawn setado no ponto de pesca (o auto relog volta para cá).", ping=False)
         else:
             log.warning("Não consegui setar o spawn: %s", result.reason)
+            # 24/09 (Ewerton, 1920x1080): falhou depois de digitar "set" e não ficou print nenhum
+            logbook.save_evidence(self._safe_shot(), "spawn " + result.reason)
             self._notify(f"⚠️ Não consegui setar o spawn: {result.reason}. Sete na mão e marque "
                          "'Já setei o spawn'.", ping=False)
         self.cb.spawn_set(result.ok)
