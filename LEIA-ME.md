@@ -1,6 +1,11 @@
+🇺🇸 [Read in English](README.md)
+
 # Slayers 2 • Pesca
 
 Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de cada item pego.
+
+⚠️ Use por sua conta e risco: macros podem violar os Termos de Serviço do Roblox e resultar em
+banimento da conta.
 
 ## Instalar (uma vez)
 
@@ -22,7 +27,9 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
    - escolha **Tenho VIP** (volta para o seu servidor privado) ou **Não tenho VIP** e digite o
      **nick exato** do dono do servidor. A linha colorida no alto da aba diz o que ainda falta.
 5. Aba **Discord** (opcional): cole o link do webhook e o seu ID para ser marcado nos itens raros.
-6. Aperte **F1** (ou o atalho que você escolher) para começar e parar.
+6. Aba **Avançado** (opcional): troque **Idioma / Language** entre Português e English. Pode pedir
+   para reabrir a macro.
+7. Aperte **F1** (ou o atalho que você escolher) para começar e parar.
 
 ## O que a macro faz sozinha
 
@@ -80,9 +87,14 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
 
 Todos podem ser trocados em **Configurar → Atalhos**. Os padrões são: F1 (iniciar e parar), F2 (marcar o ponto) e F3 (fechar).
 
+## Idioma
+
+A interface tem Português (padrão) e English. Troque em **Avançado → Idioma / Language**; pode pedir
+para reabrir a macro para a troca valer.
+
 ## Privacidade
 
 O `config.json` guarda o link do webhook, que funciona como uma senha. Não mande esse arquivo para ninguém. Se for passar a macro para alguém, passe a pasta sem o `config.json`.
 
 ---
-A detecção da barra do minigame foi portada da macro original do 1vtt (youtube.com/@1-vtt).
+Feito por zLv010x. Pode baixar e usar à vontade 🎣

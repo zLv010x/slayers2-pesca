@@ -14,6 +14,7 @@ import tkinter as tk
 from collections import Counter
 from typing import Callable, NamedTuple
 
+import i18n
 import logbook
 import window
 from window import Rect
@@ -109,7 +110,7 @@ def _section(title: str, rows: list[tuple[str, int]], max_rows: int,
     rarities = rarities or {}
     out += [Line(name, "row", qty, value.get(name), RARITY_COLORS.get(rarities.get(name))) for name, qty in shown]
     if rest:
-        out.append(Line(f"+{rest} outros", "more"))
+        out.append(Line(i18n._("+{rest} outros", rest=rest), "more"))
     if total_label and value:  # soma de todos, até os que ficaram em "+N outros"
         out.append(Line(total_label, "total", None, sum(value.values())))
     return out
@@ -130,14 +131,14 @@ def build_lines(elapsed: str, counts: Counter, baits_used: Counter, max_rows: in
     fish, items = split_counts(counts, rarities)
     lines = [Line(f"⏱ {elapsed}", "title")] if show["time"] else []
     if not fish and not items and (show["fish"] or show["items"]):
-        lines.append(Line("Nada pego ainda", "empty"))
+        lines.append(Line(i18n._("Nada pego ainda"), "empty"))
     shown_prices = prices if show["values"] else None
     if show["fish"]:
-        lines += _section("Peixes", fish, max_rows, shown_prices, f"Total ({CURRENCY})", rarities)
+        lines += _section(i18n._("Peixes"), fish, max_rows, shown_prices, i18n._("Total ({currency})", currency=CURRENCY), rarities)
     if show["items"]:
-        lines += _section("Itens", items, max_rows, shown_prices, rarities=rarities)
+        lines += _section(i18n._("Itens"), items, max_rows, shown_prices, rarities=rarities)
     if show["baits"]:
-        lines += _section("Iscas gastas", _sorted_rows(baits_used), max_rows)
+        lines += _section(i18n._("Iscas gastas"), _sorted_rows(baits_used), max_rows)
     return lines
 
 
@@ -177,7 +178,7 @@ class Overlay(tk.Toplevel):
                  capture_hidden: bool = True) -> None:
         super().__init__(master)
         self.withdraw()
-        self.title("Slayers 2 • Overlay")
+        self.title(i18n._("Slayers 2 • Overlay"))
         self.protocol("WM_DELETE_WINDOW", lambda: None)  # só some pela opção na macro
         self.overrideredirect(True)
         self.attributes("-topmost", True)

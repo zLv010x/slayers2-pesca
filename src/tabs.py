@@ -7,6 +7,7 @@ import customtkinter as ctk
 
 import logbook
 import webhook
+from i18n import _
 
 if TYPE_CHECKING:
     from app import App
@@ -110,18 +111,18 @@ class SessionTab:
 
         last = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=10)
         last.pack(fill="x", pady=4)
-        ctk.CTkLabel(last, text="Último item", text_color=MUTED, anchor="w").pack(fill="x", padx=10, pady=(6, 0))
-        self.last_img = ctk.CTkLabel(last, text="Nada ainda — boa pescaria!", height=70)
+        ctk.CTkLabel(last, text=_("Último item"), text_color=MUTED, anchor="w").pack(fill="x", padx=10, pady=(6, 0))
+        self.last_img = ctk.CTkLabel(last, text=_("Nada ainda — boa pescaria!"), height=70)
         self.last_img.pack(fill="x", padx=10, pady=(0, 8))
 
         head = ctk.CTkFrame(parent, fg_color="transparent")
         head.pack(fill="x")
-        ctk.CTkLabel(head, text="Histórico", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left", padx=4)
-        self.show_recent = ctk.CTkSwitch(head, text="mostrar", command=self._toggle_recent)
+        ctk.CTkLabel(head, text=_("Histórico"), font=ctk.CTkFont(size=13, weight="bold")).pack(side="left", padx=4)
+        self.show_recent = ctk.CTkSwitch(head, text=_("mostrar"), command=self._toggle_recent)
         self.show_recent.pack(side="right")
-        ctk.CTkButton(head, text="Abrir logs", width=90, height=24, fg_color="#374151",
+        ctk.CTkButton(head, text=_("Abrir logs"), width=90, height=24, fg_color="#374151",
                       command=app.open_logs).pack(side="right", padx=8)
-        ctk.CTkButton(head, text="Resetar", width=70, height=24, fg_color="#374151",
+        ctk.CTkButton(head, text=_("Resetar"), width=70, height=24, fg_color="#374151",
                       command=app.new_session).pack(side="right")
         if app.cfg["ui"].get("show_recent", True):
             self.show_recent.select()
@@ -149,11 +150,11 @@ class SessionTab:
 
     def _empty_text(self, visible: set[str]) -> str:
         if not visible:
-            return "Todas as raridades desligadas: clique numa etiqueta para mostrar."
+            return _("Todas as raridades desligadas: clique numa etiqueta para mostrar.")
         if self.hidden:
             chosen = ", ".join(webhook.RARITY_LABELS[r] for r in RARITY_ORDER if r in visible)
-            return f"Nenhum item {chosen} nesta sessão."
-        return "Nada ainda."
+            return _("Nenhum item {chosen} nesta sessão.", chosen=chosen)
+        return _("Nada ainda.")
 
     def toggle_filter(self, rarity: str) -> None:
         self.hidden ^= {rarity}
@@ -195,7 +196,7 @@ class SessionTab:
 
     def reset(self) -> None:
         self._shown = -1
-        self.last_img.configure(image=None, text="Nada ainda — boa pescaria!", text_color=("gray10", "gray90"))
+        self.last_img.configure(image=None, text=_("Nada ainda — boa pescaria!"), text_color=("gray10", "gray90"))
         self.refresh()
 
     def show_last(self, image, text: str) -> None:
@@ -210,70 +211,70 @@ class SetupTab:
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
-        box = section(scroll, "Ponto de lançamento")
+        box = section(scroll, _("Ponto de lançamento"))
         r = row(box)
-        ctk.CTkButton(r, text="Marcar ponto", width=130, command=app.pick_cast_point).pack(side="left")
+        ctk.CTkButton(r, text=_("Marcar ponto"), width=130, command=app.pick_cast_point).pack(side="left")
         self.cast_lbl = ctk.CTkLabel(r, text="", anchor="w")
         self.cast_lbl.pack(side="left", padx=10)
-        hint(box, "Deixe a vara na mão e a câmera do jeito que quer pescar, depois marque. "
-                  "A macro guarda a bússola e pausa se a câmera girar.")
+        hint(box, _("Deixe a vara na mão e a câmera do jeito que quer pescar, depois marque. "
+                  "A macro guarda a bússola e pausa se a câmera girar."))
         r = row(box)
-        self.lock = ctk.CTkSwitch(r, text="Travar câmera pela bússola", command=self._save_lock)
+        self.lock = ctk.CTkSwitch(r, text=_("Travar câmera pela bússola"), command=self._save_lock)
         self.lock.pack(side="left")
         if cfg.get("compass_lock", True):
             self.lock.select()
         app.number_entry(r, cfg, "compass_tolerance_px", width=50, cast=int).pack(side="right")
-        ctk.CTkLabel(r, text="tolerância px", text_color=MUTED).pack(side="right", padx=6)
+        ctk.CTkLabel(r, text=_("tolerância px"), text_color=MUTED).pack(side="right", padx=6)
         r = row(box)
-        self.auto_camera = ctk.CTkSwitch(r, text="Girar a câmera sozinha quando desviar",
+        self.auto_camera = ctk.CTkSwitch(r, text=_("Girar a câmera sozinha quando desviar"),
                                          command=self._save_auto_camera)
         self.auto_camera.pack(side="left")
         if cfg.get("auto_camera", True):
             self.auto_camera.select()
-        hint(box, "Antes de pausar, tenta arrastar a câmera de volta (botão direito) sozinha; "
-                  "só pausa esperando você se não conseguir.")
+        hint(box, _("Antes de pausar, tenta arrastar a câmera de volta (botão direito) sozinha; "
+                  "só pausa esperando você se não conseguir."))
 
-        box = section(scroll, "Barra do minigame")
+        box = section(scroll, _("Barra do minigame"))
         r = row(box)
-        ctk.CTkButton(r, text="Ajustar área", width=130, command=app.pick_scan_area).pack(side="left")
-        ctk.CTkLabel(r, text="onde aparece a barra vertical", text_color=MUTED).pack(side="left", padx=10)
+        ctk.CTkButton(r, text=_("Ajustar área"), width=130, command=app.pick_scan_area).pack(side="left")
+        ctk.CTkLabel(r, text=_("onde aparece a barra vertical"), text_color=MUTED).pack(side="left", padx=10)
 
-        box = section(scroll, "Vara")
+        box = section(scroll, _("Vara"))
         r = row(box)
-        ctk.CTkLabel(r, text="Tecla da vara").pack(side="left")
+        ctk.CTkLabel(r, text=_("Tecla da vara")).pack(side="left")
         self.rod = ctk.CTkEntry(r, width=50, justify="center")
         self.rod.insert(0, cfg["rod_key"])
         self.rod.pack(side="left", padx=8)
         self.rod.bind("<KeyRelease>", lambda _e: self._save_rod())
-        hint(box, "A macro confere a hotbar antes de lançar e só aperta a tecla se a vara não estiver na mão.")
+        hint(box, _("A macro confere a hotbar antes de lançar e só aperta a tecla se a vara não estiver na mão."))
         r = row(box)
-        self.ground = ctk.CTkSwitch(r, text="Se o item não vier, guardar a vara e pegar do chão",
+        self.ground = ctk.CTkSwitch(r, text=_("Se o item não vier, guardar a vara e pegar do chão"),
                                     command=self._save_ground)
         self.ground.pack(side="left")
         if cfg.get("ground_pickup", True):
             self.ground.select()
 
-        box = section(scroll, "Iscas")
+        box = section(scroll, _("Iscas"))
         r = row(box)
-        self.baits_on = ctk.CTkSwitch(r, text="Controlar iscas (contar e trocar sozinho)", command=self._save_baits)
+        self.baits_on = ctk.CTkSwitch(r, text=_("Controlar iscas (contar e trocar sozinho)"), command=self._save_baits)
         self.baits_on.pack(side="left")
         if cfg["baits"].get("enabled", True):
             self.baits_on.select()
         r = row(box)
-        ctk.CTkButton(r, text="Conferir iscas agora", width=150, command=app.request_bait_check).pack(side="left")
+        ctk.CTkButton(r, text=_("Conferir iscas agora"), width=150, command=app.request_bait_check).pack(side="left")
         app.number_entry(r, cfg["baits"], "recheck_at", width=50, cast=int).pack(side="right")
-        ctk.CTkLabel(r, text="conferir quando faltarem", text_color=MUTED).pack(side="right", padx=6)
+        ctk.CTkLabel(r, text=_("conferir quando faltarem"), text_color=MUTED).pack(side="right", padx=6)
         r = row(box)
-        ctk.CTkLabel(r, text="Ordem").pack(side="left")
+        ctk.CTkLabel(r, text=_("Ordem")).pack(side="left")
         self.bait_order = ctk.CTkEntry(r)
         self.bait_order.insert(0, ", ".join(cfg["baits"]["order"]))
         self.bait_order.pack(side="left", fill="x", expand=True, padx=8)
         self.bait_order.bind("<KeyRelease>", lambda _e: self._save_baits())
-        hint(box, "Na 1ª vez a macro abre o menu (M → Inventory → Fishing) e conta as iscas. "
-                  "Usa a primeira da ordem que você tiver; quando acabar, troca para a próxima e avisa.")
+        hint(box, _("Na 1ª vez a macro abre o menu (M → Inventory → Fishing) e conta as iscas. "
+                  "Usa a primeira da ordem que você tiver; quando acabar, troca para a próxima e avisa."))
 
-        box = section(scroll, "Atalhos")
-        labels = {"start_stop": "Iniciar / parar", "set_cast_point": "Marcar ponto", "exit": "Fechar macro"}
+        box = section(scroll, _("Atalhos"))
+        labels = {"start_stop": _("Iniciar / parar"), "set_cast_point": _("Marcar ponto"), "exit": _("Fechar macro")}
         self.hotkey_btns: dict[str, ctk.CTkButton] = {}
         for key, label in labels.items():
             r = row(box)
@@ -283,43 +284,43 @@ class SetupTab:
             btn.pack(side="right")
             self.hotkey_btns[key] = btn
 
-        box = section(scroll, "Janela")
+        box = section(scroll, _("Janela"))
         r = row(box)
-        self.on_top = ctk.CTkSwitch(r, text="Sempre no topo", command=self._save_on_top)
+        self.on_top = ctk.CTkSwitch(r, text=_("Sempre no topo"), command=self._save_on_top)
         self.on_top.pack(side="left")
         if cfg["ui"].get("always_on_top", True):
             self.on_top.select()
         r = row(box)
-        self.minimize = ctk.CTkSwitch(r, text="Minimizar ao iniciar a pesca", command=self._save_minimize)
+        self.minimize = ctk.CTkSwitch(r, text=_("Minimizar ao iniciar a pesca"), command=self._save_minimize)
         self.minimize.pack(side="left")
         if cfg["ui"].get("minimize_on_start", True):
             self.minimize.select()
         r = row(box)
-        self.overlay_on = ctk.CTkSwitch(r, text="Overlay por cima do jogo", command=self._save_overlay)
+        self.overlay_on = ctk.CTkSwitch(r, text=_("Overlay por cima do jogo"), command=self._save_overlay)
         self.overlay_on.pack(side="left")
         if cfg["ui"].get("overlay", True):
             self.overlay_on.select()
-        ctk.CTkButton(r, text="Voltar para a party", width=130, fg_color="#374151",
+        ctk.CTkButton(r, text=_("Voltar para a party"), width=130, fg_color="#374151",
                       command=app.reset_overlay).pack(side="right")
-        hint(box, "Mostra tempo, peixes, itens e iscas gastas. Arraste para mudar de lugar "
-                  "(com a pesca parada; pescando, os cliques passam através dele).")
+        hint(box, _("Mostra tempo, peixes, itens e iscas gastas. Arraste para mudar de lugar "
+                  "(com a pesca parada; pescando, os cliques passam através dele)."))
         self._build_overlay_filter(box, cfg)
         r = row(box)
-        self.in_capture = ctk.CTkSwitch(r, text="Aparecer no Parsec / OBS", command=self._save_in_capture)
+        self.in_capture = ctk.CTkSwitch(r, text=_("Aparecer no Parsec / OBS"), command=self._save_in_capture)
         self.in_capture.pack(side="left")
         if cfg["ui"].get("show_in_capture", False):
             self.in_capture.select()
-        hint(box, "Desligado, a janela e o overlay somem de qualquer captura enquanto pesca (no Parsec "
+        hint(box, _("Desligado, a janela e o overlay somem de qualquer captura enquanto pesca (no Parsec "
                   "parece que minimizou). Ligado, aparecem; a macro se apaga dos próprios prints, então "
-                  "deixe a janela no canto esquerdo, longe do meio da tela, da barra e da hotbar.")
-        hint(box, "No Roblox: desligue Screen Shake e Shift Lock, senão a câmera mexe durante a pesca.")
+                  "deixe a janela no canto esquerdo, longe do meio da tela, da barra e da hotbar."))
+        hint(box, _("No Roblox: desligue Screen Shake e Shift Lock, senão a câmera mexe durante a pesca."))
         self.refresh()
 
     def refresh(self) -> None:
         pt = self.app.cfg.get("cast_point")
-        lock = "  •  bússola ✓" if self.app.compass.ready else "  •  bússola ✗"
+        lock = _("  •  bússola ✓") if self.app.compass.ready else _("  •  bússola ✗")
         self.cast_lbl.configure(
-            text=(f"x {pt['x']:.3f}  y {pt['y']:.3f}{lock}" if pt else "não marcado"),
+            text=(_("x {x:.3f}  y {y:.3f}{lock}", x=pt['x'], y=pt['y'], lock=lock) if pt else _("não marcado")),
             text_color=(OK if pt else BAD))
         for key, btn in self.hotkey_btns.items():
             btn.configure(text=self.app.cfg["hotkeys"][key])
@@ -366,9 +367,9 @@ class SetupTab:
         self.overlay_parts: dict[str, ctk.CTkCheckBox] = {}
         self.overlay_rar: dict[str, ctk.CTkCheckBox] = {}
         r = row(box)
-        ctk.CTkLabel(r, text="No overlay:", text_color=MUTED).pack(side="left")
-        for key, text in (("time", "Tempo"), ("fish", "Peixes"), ("values", "Yen"), ("items", "Itens"),
-                          ("baits", "Iscas")):
+        ctk.CTkLabel(r, text=_("No overlay:"), text_color=MUTED).pack(side="left")
+        for key, text in (("time", _("Tempo")), ("fish", _("Peixes")), ("values", "Yen"), ("items", _("Itens")),
+                          ("baits", _("Iscas"))):
             cb = ctk.CTkCheckBox(r, text=text, width=20, checkbox_width=16, checkbox_height=16,
                                  command=self._save_overlay_filter)
             cb.pack(side="left", padx=(6, 0))
@@ -412,21 +413,21 @@ class DiscordTab:
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
-        box = section(scroll, "Webhook do canal")
+        box = section(scroll, _("Webhook do canal"))
         r = row(box)
         self.url = ctk.CTkEntry(r, show="•", placeholder_text="https://discord.com/api/webhooks/...")
         if d["webhook_url"]:
             self.url.insert(0, d["webhook_url"])
         self.url.pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(r, text="ver", width=40, fg_color="#374151", command=self._toggle_eye).pack(side="left", padx=(6, 0))
+        ctk.CTkButton(r, text=_("ver"), width=40, fg_color="#374151", command=self._toggle_eye).pack(side="left", padx=(6, 0))
         self.url_ok = hint(box, "")
-        hint(box, "Canal → Editar → Integrações → Webhooks → Novo → Copiar URL. "
-                  "O link funciona como senha: não compartilhe.")
+        hint(box, _("Canal → Editar → Integrações → Webhooks → Novo → Copiar URL. "
+                  "O link funciona como senha: não compartilhe."))
         self.url.bind("<KeyRelease>", lambda _e: self._save())
 
-        box = section(scroll, "Marcar você")
+        box = section(scroll, _("Marcar você"))
         r = row(box)
-        ctk.CTkLabel(r, text="Seu ID do Discord").pack(side="left")
+        ctk.CTkLabel(r, text=_("Seu ID do Discord")).pack(side="left")
         self.uid = ctk.CTkEntry(r, placeholder_text="ex.: 123456789012345678")
         if d["user_id"]:
             self.uid.insert(0, d["user_id"])
@@ -434,7 +435,7 @@ class DiscordTab:
         self.uid.bind("<KeyRelease>", lambda _e: self._save())
         self.uid_ok = hint(box, "")
         r = row(box)
-        ctk.CTkLabel(r, text="Marcar em:").pack(side="left")
+        ctk.CTkLabel(r, text=_("Marcar em:")).pack(side="left")
         self.ping: dict[str, ctk.CTkCheckBox] = {}
         for rarity in ("mythic", "legendary", "epic"):
             cb = ctk.CTkCheckBox(r, text=webhook.RARITY_LABELS[rarity], width=20, command=self._save,
@@ -444,25 +445,25 @@ class DiscordTab:
                 cb.select()
             self.ping[rarity] = cb
 
-        box = section(scroll, "Mensagens")
+        box = section(scroll, _("Mensagens"))
         r = row(box)
-        ctk.CTkLabel(r, text="Item com total em toda mensagem").pack(side="left")
+        ctk.CTkLabel(r, text=_("Item com total em toda mensagem")).pack(side="left")
         self.tracked = ctk.CTkEntry(r, width=110)
         self.tracked.insert(0, d["tracked_item"])
         self.tracked.pack(side="right")
         self.tracked.bind("<KeyRelease>", lambda _e: self._save())
         r = row(box)
-        self.send_img = ctk.CTkSwitch(r, text="Mandar print do item", command=self._save)
+        self.send_img = ctk.CTkSwitch(r, text=_("Mandar print do item"), command=self._save)
         self.send_img.pack(side="left")
         if d["send_image"]:
             self.send_img.select()
         r = row(box)
-        self.problems = ctk.CTkSwitch(r, text="Avisar quando a macro parar sozinha", command=self._save)
+        self.problems = ctk.CTkSwitch(r, text=_("Avisar quando a macro parar sozinha"), command=self._save)
         self.problems.pack(side="left")
         if d["notify_problems"]:
             self.problems.select()
         r = row(box)
-        ctk.CTkButton(r, text="Testar envio", command=app.test_discord).pack(side="left")
+        ctk.CTkButton(r, text=_("Testar envio"), command=app.test_discord).pack(side="left")
         self._validate()
 
     def _toggle_eye(self) -> None:
@@ -471,17 +472,17 @@ class DiscordTab:
     def _validate(self) -> None:
         url, uid = self.url.get().strip(), self.uid.get().strip()
         if not url:
-            self.url_ok.configure(text="Sem webhook: nada será enviado.", text_color=MUTED)
+            self.url_ok.configure(text=_("Sem webhook: nada será enviado."), text_color=MUTED)
         elif webhook.valid_webhook(url):
-            self.url_ok.configure(text="Link válido ✓", text_color=OK)
+            self.url_ok.configure(text=_("Link válido ✓"), text_color=OK)
         else:
-            self.url_ok.configure(text="Esse link não parece um webhook do Discord.", text_color=BAD)
+            self.url_ok.configure(text=_("Esse link não parece um webhook do Discord."), text_color=BAD)
         if not uid:
-            self.uid_ok.configure(text="Sem ID: ninguém é marcado.", text_color=MUTED)
+            self.uid_ok.configure(text=_("Sem ID: ninguém é marcado."), text_color=MUTED)
         elif webhook.valid_user_id(uid):
-            self.uid_ok.configure(text="ID válido ✓", text_color=OK)
+            self.uid_ok.configure(text=_("ID válido ✓"), text_color=OK)
         else:
-            self.uid_ok.configure(text="O ID tem só números (Modo desenvolvedor → Copiar ID).", text_color=BAD)
+            self.uid_ok.configure(text=_("O ID tem só números (Modo desenvolvedor → Copiar ID)."), text_color=BAD)
 
     def _save(self) -> None:
         d = self.app.cfg["discord"]
@@ -496,31 +497,48 @@ class DiscordTab:
         self.app.save_soon()
 
 
+LANGUAGE_REOPEN_WARNING = "Reabra a macro para trocar o idioma / Reopen the macro to change the language"
+
+
 # ---------------------------------------------------------------- Avançado
 class AdvancedTab:
     def __init__(self, app: "App", parent, on_reset: Callable[[], None]) -> None:
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
-        titles = {"timings": "Tempos", "limits": "Limites de segurança", "tracking": "Minigame"}
+        self.app = app
+        self._build_language(scroll)
+        titles = {"timings": _("Tempos"), "limits": _("Limites de segurança"), "tracking": _("Minigame")}
         for group, fields in ADVANCED_FIELDS.items():
             box = section(scroll, titles[group])
             for key, label, tip in fields:
                 r = row(box)
-                ctk.CTkLabel(r, text=label).pack(side="left")
+                ctk.CTkLabel(r, text=_(label)).pack(side="left")
                 cast = int if group == "limits" else float
                 app.number_entry(r, app.cfg[group], key, width=70, cast=cast).pack(side="right")
-                hint(box, tip)
-        box = section(scroll, "Diagnóstico")
+                hint(box, _(tip))
+        box = section(scroll, _("Diagnóstico"))
         r = row(box)
-        self.app = app
-        self.diagnostic = ctk.CTkSwitch(r, text="Modo diagnóstico (log detalhado e prints dos problemas)",
+        self.diagnostic = ctk.CTkSwitch(r, text=_("Modo diagnóstico (log detalhado e prints dos problemas)"),
                                         command=self._save_diagnostic)
         self.diagnostic.pack(side="left")
         if app.cfg.get("diagnostic", False):
             self.diagnostic.select()
-        hint(box, "Deixa a macro mais pesada: ligue só quando for investigar um problema. Os prints "
-                  "ficam em logs/evidencias.")
-        ctk.CTkButton(scroll, text="Restaurar padrões", fg_color="#374151", command=on_reset).pack(pady=10)
+        hint(box, _("Deixa a macro mais pesada: ligue só quando for investigar um problema. Os prints "
+                  "ficam em logs/evidencias."))
+        ctk.CTkButton(scroll, text=_("Restaurar padrões"), fg_color="#374151", command=on_reset).pack(pady=10)
+
+    def _build_language(self, scroll) -> None:
+        box = section(scroll, _("Idioma / Language"))
+        self.language = ctk.StringVar(value=self.app.cfg["ui"].get("language", "pt"))
+        for value, text in (("pt", "Português"), ("en", "English")):
+            ctk.CTkRadioButton(row(box), text=text, variable=self.language, value=value,
+                               command=self._save_language).pack(side="left")
+        hint(box, LANGUAGE_REOPEN_WARNING)
+
+    def _save_language(self) -> None:
+        self.app.cfg["ui"]["language"] = self.language.get()
+        self.app.save_soon()
+        self.app.set_status(LANGUAGE_REOPEN_WARNING)
 
     def _save_diagnostic(self) -> None:
         self.app.cfg["diagnostic"] = bool(self.diagnostic.get())

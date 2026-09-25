@@ -17,6 +17,7 @@ import numpy as np
 import capture_mode
 import logbook
 import window
+import i18n
 import relog
 import screen
 import spawn
@@ -98,7 +99,7 @@ def set_spawn(f) -> spawn.SpawnResult:
     except Exception as exc:
         log.exception("Erro ao setar o spawn")
         _close_command_box(actions)
-        return spawn.SpawnResult(False, f"erro inesperado ({type(exc).__name__})")
+        return spawn.SpawnResult(False, i18n._("erro inesperado ({tipo})", tipo=type(exc).__name__))
 
 
 def _close_command_box(actions: RelogActions) -> None:
@@ -139,19 +140,19 @@ def lost_game_screen(img: np.ndarray | None, cfg: dict | None = None) -> relog.S
 
 def _describe(s: relog.Screen) -> str:
     if s.kind == "main_menu":
-        return "o jogo voltou para o menu principal (o servidor reiniciou ou você caiu)"
-    code = f" (código {s.error_code})" if s.error_code is not None else ""
+        return i18n._("o jogo voltou para o menu principal (o servidor reiniciou ou você caiu)")
+    code = i18n._(" (código {code})", code=s.error_code) if s.error_code is not None else ""
     msg = f": {s.message}" if s.message else ""
-    return f"desconectado do jogo{code}{msg}"
+    return i18n._("desconectado do jogo{code}{msg}", code=code, msg=msg)
 
 
 def _stop_for_good(f, msg: str) -> None:
     key = f.cfg["hotkeys"]["start_stop"]
-    full = f"{msg}. Entre de novo, volte ao ponto de pesca e aperte {key}."
+    full = i18n._("{msg}. Entre de novo, volte ao ponto de pesca e aperte {key}.", msg=msg, key=key)
     log.error("Pesca parada de vez: %s", full)
-    f._notify("🏠 Pesca parada: " + full)
+    f._notify("🏠 " + i18n._("Pesca parada: {full}", full=full))
     f.stop_for_good = True
-    raise StopRun("Parei: " + full)
+    raise StopRun(i18n._("Parei: {full}", full=full))
 
 
 def handle(f, img: np.ndarray | None) -> bool:
@@ -228,30 +229,30 @@ def _handle(f, img: np.ndarray | None) -> bool:
     logbook.save_evidence(img, "caiu do jogo")
     r = f.cfg.get("relog", {})
     if s.kind == "disconnected" and s.error_code in r.get("no_reconnect_codes", [264]):
-        _stop_for_good(f, f"{what}; esse código não reconecta sozinho")
+        _stop_for_good(f, i18n._("{what}; esse código não reconecta sozinho", what=what))
     reason = not_ready_reason(f.cfg)
     if reason:
-        _stop_for_good(f, f"{what} (auto relog: {reason})")
+        _stop_for_good(f, i18n._("{what} (auto relog: {reason})", what=what, reason=i18n._(reason)))
     if not f.relog_budget.allowed(int(r.get("max_per_hour", DEFAULT_MAX_PER_HOUR))):
-        _stop_for_good(f, f"{what}, e já reconectei demais na última hora")
+        _stop_for_good(f, i18n._("{what}, e já reconectei demais na última hora", what=what))
     return _reconnect(f, what)
 
 
 def _reconnect(f, what: str) -> bool:
     f.relog_budget.record_restart()
     log.warning("Caiu do jogo: %s. Reconectando sozinho.", what)
-    f._notify(f"🔁 {what}: reconectando sozinho...", ping=False)
+    f._notify(i18n._("🔁 {what}: reconectando sozinho...", what=what), ping=False)
     result = relog.Relogger(f.cfg["relog"], RelogActions(f)).run()
     if result.ok:
         log.info("Reconectado: voltando a pescar.")
-        f._notify("✅ Reconectado: voltando a pescar.", ping=False)
+        f._notify(i18n._("✅ Reconectado: voltando a pescar."), ping=False)
         f.recoveries = 0
         f.after_relog = True  # se nem assim pegar peixe, o spawn está longe da água
         f._relog_failed = 0
         return True
     if result.reason == "codigo_sem_reconexao":
-        _stop_for_good(f, f"{what}; esse código não reconecta sozinho")
-    msg = f"não consegui reconectar sozinho ({result.reason})"
+        _stop_for_good(f, i18n._("{what}; esse código não reconecta sozinho", what=what))
+    msg = i18n._("não consegui reconectar sozinho ({reason})", reason=result.reason)
     log.error(msg)
-    f._notify(f"🛑 {msg}. Tento de novo no próximo reinício automático.")
+    f._notify(i18n._("🛑 {msg}. Tento de novo no próximo reinício automático.", msg=msg))
     raise StopRun("Parei: " + msg)

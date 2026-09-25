@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+import i18n
 import ocr
 
 # Parte de cima da tela inteira: o botão fica no alto e a lista desce ~25% da altura.
@@ -228,7 +229,7 @@ class Setter:
             return None
         self._seen = True
         if same_for >= STEP_TIMEOUT_SEC:
-            return self._give_up(s, f"travou em '{s.kind}'")
+            return self._give_up(s, i18n._("travou em '{kind}'", kind=s.kind))
         handler = getattr(self, f"_on_{s.kind}")
         return handler(s, now)
 
@@ -251,7 +252,7 @@ class Setter:
             if "closed_box" not in self._clicked:
                 return self._give_up(s, "a lista já estava aberta (não fui eu que abri)")
             if self._list_reads >= LIST_READS_TO_TYPE:
-                self.a.status("Setando o spawn: digitando 'set'.")
+                self.a.status(i18n._("Setando o spawn: digitando 'set'."))
                 self.a.type_text("set")  # lista aberta em leituras seguidas = caixinha ativa
                 self._typed_at = now
         elif now - self._typed_at >= TYPE_CONFIRM_SEC:
@@ -281,14 +282,17 @@ class Setter:
         return self.a.click(*pos) is not False  # clique que não saiu (mouse em uso) não conta
 
     def _done(self) -> SpawnResult:
-        self.a.status("Spawn setado no ponto de pesca.")
+        self.a.status(i18n._("Spawn setado no ponto de pesca."))
         return SpawnResult(True, "ok")
 
     def _give_up(self, s: SpawnScreen, reason: str) -> SpawnResult:
         """Desiste; fecha a caixinha só se o X estiver na tela AGORA (nunca clica onde ele estava)."""
         if s.cancel_pos is not None:
             self.a.click(*s.cancel_pos)
+            reason = i18n._(reason)
         elif self._seen:
-            reason += " (a caixinha pode ter ficado aberta)"
-        self.a.status(f"Não consegui setar o spawn: {reason}.")
+            reason = i18n._("{reason} (a caixinha pode ter ficado aberta)", reason=i18n._(reason))
+        else:
+            reason = i18n._(reason)
+        self.a.status(i18n._("Não consegui setar o spawn: {reason}.", reason=reason))
         return SpawnResult(False, reason)

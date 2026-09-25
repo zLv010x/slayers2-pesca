@@ -17,6 +17,7 @@ from collections.abc import Iterable, Iterator
 
 import numpy as np
 
+import i18n
 import window
 from window import Rect
 
@@ -92,18 +93,18 @@ def _area_rects(cfg: dict) -> dict[str, tuple[float, float, float, float]]:
     import loot
     import prompt
     areas = {
-        "avisos dos itens": (loot.REGION_X[0], loot.REGION_Y[0], loot.REGION_X[1], loot.REGION_Y[1]),
-        "aviso de coleta (T)": (prompt.REGION_X[0], prompt.REGION_Y[0], prompt.REGION_X[1], prompt.REGION_Y[1]),
-        "bússola": (compass.STRIP_X[0], compass.STRIP_Y[0], compass.STRIP_X[1], compass.STRIP_Y[1]),
-        "hotbar": HOTBAR,
+        i18n._("avisos dos itens"): (loot.REGION_X[0], loot.REGION_Y[0], loot.REGION_X[1], loot.REGION_Y[1]),
+        i18n._("aviso de coleta (T)"): (prompt.REGION_X[0], prompt.REGION_Y[0], prompt.REGION_X[1], prompt.REGION_Y[1]),
+        i18n._("bússola"): (compass.STRIP_X[0], compass.STRIP_Y[0], compass.STRIP_X[1], compass.STRIP_Y[1]),
+        i18n._("hotbar"): HOTBAR,
     }
     sa = cfg.get("scan_area")
     if sa:
-        areas["barra do minigame"] = (sa["x"], sa["y"], sa["x"] + sa["w"], sa["y"] + sa["h"])
+        areas[i18n._("barra do minigame")] = (sa["x"], sa["y"], sa["x"] + sa["w"], sa["y"] + sa["h"])
     cp = cfg.get("cast_point")
     if cp:
         m = CAST_POINT_MARGIN
-        areas["ponto de lançamento"] = (cp["x"] - m, cp["y"] - m, cp["x"] + m, cp["y"] + m)
+        areas[i18n._("ponto de lançamento")] = (cp["x"] - m, cp["y"] - m, cp["x"] + m, cp["y"] + m)
     return areas
 
 

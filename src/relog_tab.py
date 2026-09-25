@@ -7,6 +7,7 @@ import customtkinter as ctk
 
 import config
 import relog_bridge
+from i18n import _
 from tabs import AMBER, BAD, MUTED, OK, hint, row, section
 
 if TYPE_CHECKING:
@@ -23,14 +24,14 @@ NICK_MAX = 40
 def status_line(cfg: dict) -> tuple[str, str]:
     """Texto e tom ("ok", "warn", "bad", "off") do estado do auto relog."""
     if not cfg.get("relog", {}).get("enabled"):
-        return "Desligado: se o jogo cair, a pesca para e espera você.", "off"
+        return _("Desligado: se o jogo cair, a pesca para e espera você."), "off"
     reason = relog_bridge.not_ready_reason(cfg)
     if reason is None:
-        return "✓ Pronto: se o jogo cair, reconecta e volta a pescar sozinho.", "ok"
+        return _("✓ Pronto: se o jogo cair, reconecta e volta a pescar sozinho."), "ok"
     if reason == relog_bridge.SPAWN_NOT_SET:
-        return ("Falta setar o spawn: inicie a pesca no ponto de pesca que a macro seta sozinha "
-                "depois do 1º peixe (ou use o botão \"Setar spawn agora\").", "warn")
-    return f"Não vai reconectar: {reason}.", "bad"
+        return (_("Falta setar o spawn: inicie a pesca no ponto de pesca que a macro seta sozinha "
+                "depois do 1º peixe (ou use o botão \"Setar spawn agora\")."), "warn")
+    return _("Não vai reconectar: {reason}.", reason=_(reason)), "bad"
 
 
 class RelogTab:
@@ -49,56 +50,56 @@ class RelogTab:
 
     # ------------------------------------------------------------ montagem
     def _build_switch(self, scroll) -> None:
-        box = section(scroll, "Auto relog")
-        self.enabled = ctk.CTkSwitch(row(box), text="Reconectar sozinho se o jogo cair", command=self._save)
+        box = section(scroll, _("Auto relog"))
+        self.enabled = ctk.CTkSwitch(row(box), text=_("Reconectar sozinho se o jogo cair"), command=self._save)
         self.enabled.pack(side="left")
-        hint(box, "Quando cair (menu do jogo ou 'Disconnected'): Reconnect → PLAY → mundo → servidor "
+        hint(box, _("Quando cair (menu do jogo ou 'Disconnected'): Reconnect → PLAY → mundo → servidor "
                   "privado → nasce no spawn setado e volta a pescar. Se a conta entrar em outro PC "
-                  "(erro 264), não reconecta.")
+                  "(erro 264), não reconecta."))
         r = row(box)
-        ctk.CTkLabel(r, text="Reconexões por hora (máx.)").pack(side="left")
+        ctk.CTkLabel(r, text=_("Reconexões por hora (máx.)")).pack(side="left")
         self.app.number_entry(r, self.app.cfg["relog"], "max_per_hour", width=50, cast=int).pack(side="right")
-        for key, text in (("step_timeout_sec", "Espera máx. por passo (s)"),
-                          ("loading_timeout_sec", "Espera máx. carregando o jogo (s)")):
+        for key, text in (("step_timeout_sec", _("Espera máx. por passo (s)")),
+                          ("loading_timeout_sec", _("Espera máx. carregando o jogo (s)"))):
             r = row(box)
             ctk.CTkLabel(r, text=text).pack(side="left")
             self.app.number_entry(r, self.app.cfg["relog"], key, width=60).pack(side="right")
-        hint(box, "Cada PC demora um tanto para carregar: aumente se o seu for mais lento.")
+        hint(box, _("Cada PC demora um tanto para carregar: aumente se o seu for mais lento."))
 
     def _build_spawn(self, scroll) -> None:
-        box = section(scroll, "Gamepass Set Spawn")
-        self.gamepass = ctk.CTkCheckBox(row(box), text="Tenho o gamepass Set Spawn", command=self._save)
+        box = section(scroll, _("Gamepass Set Spawn"))
+        self.gamepass = ctk.CTkCheckBox(row(box), text=_("Tenho o gamepass Set Spawn"), command=self._save)
         self.gamepass.pack(side="left")
-        hint(box, "Obrigatório para o relog: depois de reconectar o personagem nasce no spawn. "
-                  "Sem o gamepass ele nasceria longe do ponto de pesca.")
-        self.spawn_set = ctk.CTkCheckBox(row(box), text="Já setei o spawn no ponto de pesca", command=self._save)
+        hint(box, _("Obrigatório para o relog: depois de reconectar o personagem nasce no spawn. "
+                  "Sem o gamepass ele nasceria longe do ponto de pesca."))
+        self.spawn_set = ctk.CTkCheckBox(row(box), text=_("Já setei o spawn no ponto de pesca"), command=self._save)
         self.spawn_set.pack(side="left")
         r = row(box)
-        self.spawn_btn = ctk.CTkButton(r, text="Setar spawn agora", width=150, command=self.app.request_set_spawn)
+        self.spawn_btn = ctk.CTkButton(r, text=_("Setar spawn agora"), width=150, command=self.app.request_set_spawn)
         self.spawn_btn.pack(side="left")
-        ctk.CTkLabel(r, text="fique no ponto de pesca", text_color=MUTED).pack(side="left", padx=6)
-        hint(box, "Se não estiver setado, a macro seta sozinha depois do 1º peixe "
-                  "(Commands → digita set → Enter → ✓ verde).")
+        ctk.CTkLabel(r, text=_("fique no ponto de pesca"), text_color=MUTED).pack(side="left", padx=6)
+        hint(box, _("Se não estiver setado, a macro seta sozinha depois do 1º peixe "
+                  "(Commands → digita set → Enter → ✓ verde)."))
 
     def _build_server(self, scroll) -> None:
-        box = section(scroll, "Servidor para voltar")
+        box = section(scroll, _("Servidor para voltar"))
         self.mode = ctk.StringVar(value="vip")
-        for value, text in (("vip", "Tenho VIP (volto para o meu servidor privado)"),
-                            ("nick", "Não tenho VIP (entro no servidor de outra pessoa)")):
+        for value, text in (("vip", _("Tenho VIP (volto para o meu servidor privado)")),
+                            ("nick", _("Não tenho VIP (entro no servidor de outra pessoa)"))):
             ctk.CTkRadioButton(row(box), text=text, variable=self.mode, value=value,
                                command=self._save).pack(side="left")
         r = row(box)
-        ctk.CTkLabel(r, text="Nick do dono").pack(side="left")
-        self.nick = ctk.CTkEntry(r, placeholder_text="nick exato de quem tem o servidor")
+        ctk.CTkLabel(r, text=_("Nick do dono")).pack(side="left")
+        self.nick = ctk.CTkEntry(r, placeholder_text=_("nick exato de quem tem o servidor"))
         self.nick.pack(side="left", fill="x", expand=True, padx=8)
         self.nick.bind("<KeyRelease>", lambda _e: self._save())
         self.server_hint = hint(box, "")
         r = row(box)
-        ctk.CTkLabel(r, text="Mundo").pack(side="left")
+        ctk.CTkLabel(r, text=_("Mundo")).pack(side="left")
         self.world = ctk.CTkEntry(r, width=140)
         self.world.pack(side="left", padx=8)
         self.world.bind("<KeyRelease>", lambda _e: self._save())
-        ctk.CTkLabel(r, text="card clicado na lista de servidores", text_color=MUTED).pack(side="left")
+        ctk.CTkLabel(r, text=_("card clicado na lista de servidores"), text_color=MUTED).pack(side="left")
 
     # ------------------------------------------------------------ estado
     def _load(self) -> None:
@@ -131,7 +132,7 @@ class RelogTab:
             widget.configure(state="normal" if has_pass else "disabled")
         is_nick = self.mode.get() == "nick"
         self.nick.configure(state="normal" if is_nick else "disabled")
-        self.server_hint.configure(text=SERVER_HINTS["nick" if is_nick else "vip"])
+        self.server_hint.configure(text=_(SERVER_HINTS["nick" if is_nick else "vip"]))
 
     def sync(self) -> None:
         """Marca "Já setei o spawn" depois que a macro setou sozinha."""

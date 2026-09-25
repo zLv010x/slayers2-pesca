@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from i18n import _
 import logbook
 from session import format_elapsed
 
@@ -89,16 +90,17 @@ class BaitState:
 
     def summary(self, infinite: list[str]) -> str:
         if not self.checked:
-            return "Iscas: ainda não conferidas"
+            return _("Iscas: ainda não conferidas")
         if self.equipped is None:
-            return "Sem isca equipada"
+            return _("Sem isca equipada")
         if self.is_infinite(infinite):
-            return f"Isca: {self.equipped} (não gasta)"
+            return _("Isca: {name} (não gasta)", name=self.equipped)
         left = self.remaining()
         if left is None:
-            return f"Isca: {self.equipped} (quantidade ?)"
+            return _("Isca: {name} (quantidade ?)", name=self.equipped)
         eta = self.eta_seconds(infinite)
-        return f"Isca: {self.equipped} · {left}" + (f" · ~{format_elapsed(eta)}" if eta else "")
+        text = _("Isca: {name} · {left}", name=self.equipped, left=left)
+        return text + (_(" · ~{eta}", eta=format_elapsed(eta)) if eta else "")
 
     def needs_check(self, recheck_at: int, infinite: list[str]) -> bool:
         """Hora de abrir o inventário para conferir de verdade?"""

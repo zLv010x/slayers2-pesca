@@ -36,6 +36,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+import i18n
 import menu
 import ocr
 
@@ -315,7 +316,7 @@ class Relogger:
         while True:
             now = a.now()
             if now >= total_deadline:
-                a.status("Reconexão automática: tempo total esgotado.")
+                a.status(i18n._("Reconexão automática: tempo total esgotado."))
                 return RelogResult(False, "timeout_total")
             _, _, frame = a.grab()
             screen = classify(frame, cfg)
@@ -324,7 +325,7 @@ class Relogger:
                 if screen.kind != "unknown":
                     self._unknown_since = None
             elif now >= step_deadline:
-                a.status(f"Reconexão automática: travou em '{screen.kind}'.")
+                a.status(i18n._("Reconexão automática: travou em '{kind}'.", kind=screen.kind))
                 return RelogResult(False, "timeout_etapa")
             result = self._step(screen, frame)
             if result is not None:
@@ -354,24 +355,25 @@ class Relogger:
     def _on_disconnected(self, screen: Screen, frame: np.ndarray) -> RelogResult | None:
         no_reconnect = self.cfg.get("no_reconnect_codes", DEFAULTS["no_reconnect_codes"])
         if screen.error_code in no_reconnect:
-            self.actions.status(f"Desconectado (código {screen.error_code}): não reconecto sozinho.")
+            self.actions.status(i18n._("Desconectado (código {code}): não reconecto sozinho.",
+                                 code=screen.error_code))
             return RelogResult(False, "codigo_sem_reconexao", screen.error_code)
         if screen.reconnect_pos is None:
-            self.actions.status("Desconectado sem botão Reconnect: avisando.")
+            self.actions.status(i18n._("Desconectado sem botão Reconnect: avisando."))
             return RelogResult(False, "sem_botao_reconnect", screen.error_code)
-        self.actions.status("Desconectado: clicando em Reconnect.")
+        self.actions.status(i18n._("Desconectado: clicando em Reconnect."))
         self._throttled_click("disconnected", *screen.reconnect_pos)
         return None
 
     def _on_main_menu(self, screen: Screen, frame: np.ndarray) -> None:
         if screen.play_pos:
-            self.actions.status("Menu principal: clicando em PLAY.")
+            self.actions.status(i18n._("Menu principal: clicando em PLAY."))
             self._throttled_click("main_menu", *screen.play_pos)
 
     def _on_server_select(self, screen: Screen, frame: np.ndarray) -> None:
         if screen.card_pos:
             map_name = self.cfg.get("map_name", DEFAULTS["map_name"])
-            self.actions.status(f"Selecionando o servidor {map_name}.")
+            self.actions.status(i18n._("Selecionando o servidor {map_name}.", map_name=map_name))
             self._throttled_click("server_select", *screen.card_pos)
 
     def _on_server_card(self, screen: Screen, frame: np.ndarray) -> None:
@@ -381,17 +383,17 @@ class Relogger:
             self._join_nick(screen)
 
     def _on_loading(self, screen: Screen, frame: np.ndarray) -> None:
-        self.actions.status("Carregando...")
+        self.actions.status(i18n._("Carregando..."))
 
     def _on_game_loading(self, screen: Screen, frame: np.ndarray) -> None:
         """Carregando o jogo: clica em "Skip loading!" (de novo só depois do intervalo) e espera."""
-        self.actions.status("Carregando o jogo: clicando em Skip loading.")
+        self.actions.status(i18n._("Carregando o jogo: clicando em Skip loading."))
         if screen.skip_pos:
             self._throttled_click("game_loading", *screen.skip_pos)
 
     def _on_unknown(self, screen: Screen, frame: np.ndarray) -> RelogResult | None:
         if self.actions.in_game(frame):
-            self.actions.status("De volta ao jogo.")
+            self.actions.status(i18n._("De volta ao jogo."))
             return RelogResult(True, "ok")
         # sem confirmação: se já não é nenhuma tela conhecida há tempo suficiente,
         # considera que voltou (cobre chamar o relog com o jogo já normal)
@@ -400,7 +402,7 @@ class Relogger:
             self._unknown_since = now
         settle = self.cfg.get("settle_sec", DEFAULTS["settle_sec"])
         if now - self._unknown_since >= settle:
-            self.actions.status("De volta ao jogo (tela normal por tempo suficiente).")
+            self.actions.status(i18n._("De volta ao jogo (tela normal por tempo suficiente)."))
             return RelogResult(True, "ok")
         return None
 
@@ -409,7 +411,7 @@ class Relogger:
         vira "JOIN PRIVATE" e entra no servidor privado da pessoa."""
         if not screen.join_pos:
             return
-        self.actions.status("Servidor VIP: segurando o JOIN.")
+        self.actions.status(i18n._("Servidor VIP: segurando o JOIN."))
         self._hold_join(*screen.join_pos)
 
     def _join_nick(self, screen: Screen) -> None:
@@ -418,13 +420,13 @@ class Relogger:
             if not screen.owner_field_pos:
                 return
             nick = self.cfg.get("owner_nick", "")
-            a.status(f"Servidor por nick: digitando '{nick}'.")
+            a.status(i18n._("Servidor por nick: digitando '{nick}'.", nick=nick))
             a.click(*screen.owner_field_pos)
             a.type_text(nick)
             a.press("enter")
             self._typed_nick = True
         elif screen.join_private_pos:
-            a.status("Clicando em Join Private.")
+            a.status(i18n._("Clicando em Join Private."))
             a.click(*screen.join_private_pos)
 
     def _hold_join(self, x: int, y: int) -> None:

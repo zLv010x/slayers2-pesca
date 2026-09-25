@@ -99,6 +99,7 @@ DEFAULTS: dict = {
     "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True,
            "overlay": True, "overlay_pos": None,
            "show_in_capture": False,
+           "language": "pt",  # "pt" ou "en" (pode pedir para reabrir a macro)
            # filtro do overlay: o que aparece e quais raridades
            "overlay_show": {"time": True, "fish": True, "values": True, "items": True, "baits": True},
            "overlay_rarities": ["mythic", "legendary", "epic", "rare", "common"]},  # aparecer no Parsec/OBS (a macro se apaga dos próprios prints)

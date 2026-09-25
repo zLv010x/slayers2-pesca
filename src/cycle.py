@@ -21,6 +21,7 @@ import numpy as np
 import bait_menu
 import capture_mode
 import hotbar
+import i18n
 import logbook
 import loot as loot_mod
 import prompt as prompt_mod
@@ -191,27 +192,27 @@ class Fisher:
             if not self.hwnd or window.client_rect(self.hwnd) is None:
                 self.hwnd = window.find_roblox()
             if self.hwnd is None:
-                self.cb.status("Roblox não encontrado. Abra o jogo.")
+                self.cb.status(i18n._("Roblox não encontrado. Abra o jogo."))
                 if missing_since is None:
                     missing_since = time.perf_counter()
                 elif not missing_notified and time.perf_counter() - missing_since >= self.t("recovery_wait_sec"):
-                    self._notify("⏸️ Pesca pausada: Roblox não encontrado. Abra o jogo para continuar.")
+                    self._notify(i18n._("⏸️ Pesca pausada: Roblox não encontrado. Abra o jogo para continuar."))
                     missing_notified = True
             elif window.is_foreground(self.hwnd):
                 missing_since, missing_notified = None, False
                 r = window.client_rect(self.hwnd)
                 if r is not None:
                     if warned:
-                        self.cb.status("Roblox de volta, continuando...")
+                        self.cb.status(i18n._("Roblox de volta, continuando..."))
                     return r
             else:
                 missing_since, missing_notified = None, False
                 if not warned:
                     self.mouse.release()
-                    self.cb.status("Pausado: o Roblox não está na frente. Clique no jogo para continuar.")
+                    self.cb.status(i18n._("Pausado: o Roblox não está na frente. Clique no jogo para continuar."))
                     warned, paused_since, last_refocus = True, time.perf_counter(), time.perf_counter()
                 elif not notified and time.perf_counter() - paused_since >= self.t("recovery_wait_sec"):
-                    self._notify("⏸️ Pesca pausada: o Roblox não está na frente. Clique no jogo para continuar.")
+                    self._notify(i18n._("⏸️ Pesca pausada: o Roblox não está na frente. Clique no jogo para continuar."))
                     notified = True
                 refocus = self.t("refocus_after_sec")
                 if refocus > 0 and time.perf_counter() - last_refocus >= refocus:
@@ -242,10 +243,11 @@ class Fisher:
                 return
             if not key or attempt == retries:
                 break
-            self.cb.status(f"Vara fora da mão: apertando {key.upper()} ({attempt + 1}/{retries})...")
+            self.cb.status(i18n._("Vara fora da mão: apertando {key} ({n}/{total})...",
+                            key=key.upper(), n=attempt + 1, total=retries))
             screen.tap_key(key)
             self.sleep(self.t("rod_equip_wait_sec"))
-        raise Recoverable(f"não consegui equipar a vara (tecla {key.upper() or '?'})", img)
+        raise Recoverable(i18n._("não consegui equipar a vara (tecla {key})", key=key.upper() or '?'), img)
 
     def check_camera(self) -> None:
         if not self.cfg.get("compass_lock", True) or not self.compass.ready:
@@ -283,14 +285,14 @@ class Fisher:
                     # a câmera gira segurando o botão direito: espera soltar antes de lançar
                     screen.wait_mouse_free(sleep=self.sleep)
                 return
-            msg = "bússola não encontrada" if drift is None else f"câmera girou {drift:+d}px"
+            msg = i18n._("bússola não encontrada") if drift is None else i18n._("câmera girou {drift:+d}px", drift=drift)
             if paused_at is None:
                 paused_at, last_nudge = now, now
                 logbook.save_evidence(img, "camera " + msg)
             elif not notified and now - paused_at >= self.t("recovery_wait_sec"):
-                self._notify(f"⏸️ Pesca pausada: {msg}. Arrume a câmera no jogo para continuar.")
+                self._notify(i18n._("⏸️ Pesca pausada: {msg}. Arrume a câmera no jogo para continuar.", msg=msg))
                 notified = True
-            self.cb.status(f"Pausado: {msg}. Volte a câmera para a posição marcada (ou remarque o ponto).")
+            self.cb.status(i18n._("Pausado: {msg}. Volte a câmera para a posição marcada (ou remarque o ponto).", msg=msg))
             self.sleep(1.0)
             last_nudge = self._anti_idle_tick(last_nudge, time.perf_counter())
 
@@ -405,7 +407,7 @@ class Fisher:
         while True:
             if not screen.on_monitor(x, y):
                 r, x, y = self._wait_cast_point_on_monitor()
-            self.cb.status("Lançando...")
+            self.cb.status(i18n._("Lançando..."))
             log.debug("Clique de lançamento em (%d, %d) na janela %dx%d", x, y, r.w, r.h)
             result = screen.click_at(x, y)
             if result.ok:
@@ -414,8 +416,8 @@ class Fisher:
             log.warning("Lançamento não chegou ao ponto (%s, cursor em %s).", result.reason, result.pos)
             busy_tries += 1
             if busy_tries >= CAST_BUSY_TRIES:
-                raise Recoverable(f"o mouse não chegou no ponto de lançamento ({x}, {y})", self._safe_shot())
-            self.cb.status("Pausado: mouse em uso. Esperando soltar...")
+                raise Recoverable(i18n._("o mouse não chegou no ponto de lançamento ({x}, {y})", x=x, y=y), self._safe_shot())
+            self.cb.status(i18n._("Pausado: mouse em uso. Esperando soltar..."))
             screen.wait_mouse_free(sleep=self.sleep)
             r = self.rect()
             x, y = self.to_screen(r, pt["x"], pt["y"])
@@ -423,14 +425,14 @@ class Fisher:
     def _wait_cast_point_on_monitor(self) -> tuple[window.Rect, int, int]:
         """A janela saiu (parcialmente) da tela e o ponto de lançamento ficou fora do
         monitor: pausa até a janela voltar, sem contar como recuperação."""
-        msg = "a janela do Roblox está saindo da tela; o ponto de lançamento ficou fora do monitor"
+        msg = i18n._("a janela do Roblox está saindo da tela; o ponto de lançamento ficou fora do monitor")
         paused_at, notified = time.perf_counter(), False
         last_nudge = paused_at
         logbook.save_evidence(self._safe_shot(), "lançamento fora do monitor")
         while True:
-            self.cb.status(f"Pausado: {msg}.")
+            self.cb.status(i18n._("Pausado: {msg}.", msg=msg))
             if not notified and time.perf_counter() - paused_at >= self.t("recovery_wait_sec"):
-                self._notify(f"⏸️ Pesca pausada: {msg}. Mova a janela do Roblox de volta para a tela.")
+                self._notify(i18n._("⏸️ Pesca pausada: {msg}. Mova a janela do Roblox de volta para a tela.", msg=msg))
                 notified = True
             self.sleep(OFF_MONITOR_POLL_SEC)
             last_nudge = self._anti_idle_tick(last_nudge, time.perf_counter())
@@ -462,7 +464,7 @@ class Fisher:
         lost_sec = self.t("ball_lost_sec")
         started, hits, last_game, near, last_seen = False, 0, None, None, 0.0
         self.mouse.release()
-        self.cb.status("Esperando o peixe morder...")
+        self.cb.status(i18n._("Esperando o peixe morder..."))
         try:
             while True:
                 t0 = time.perf_counter()
@@ -486,7 +488,7 @@ class Fisher:
                             end_deadline = now + self.t("minigame_max_sec")
                             waited = now - (start_deadline - self.t("minigame_start_timeout_sec"))
                             log.info("Peixe mordeu após %.1fs (quadrado %dpx)", waited, game.ball_h)
-                            self.cb.status("Minigame!")
+                            self.cb.status(i18n._("Minigame!"))
                             self._spend_bait()
                     else:
                         hits = 1 if game is not None else 0
@@ -541,7 +543,7 @@ class Fisher:
         holding, hold_since, last_seen, seen_any, restarts = False, 0.0, -1.0, False, 0
         released_at = start  # marca a última vez que soltou (ou o início, se nunca soltou)
         misses, polls = 0, 0
-        self.cb.status(f"Segurando T para pegar ({where})...")
+        self.cb.status(i18n._("Segurando T para pegar ({where})...", where=i18n._(where)))
         try:
             while time.perf_counter() < deadline:
                 _, img = self.frame()
@@ -598,7 +600,7 @@ class Fisher:
         key = str(self.cfg["rod_key"]).strip().lower()
         if not key:
             return
-        self.cb.status(f"Item não veio da vara: guardando a vara ({key.upper()}) para pegar do chão...")
+        self.cb.status(i18n._("Item não veio da vara: guardando a vara ({key}) para pegar do chão...", key=key.upper()))
         screen.tap_key(key)
         self.sleep(self.t("rod_equip_wait_sec"))
         _, img = self.frame()
@@ -700,7 +702,7 @@ class Fisher:
             with capture_mode.hidden():
                 closed = self._close_menu(bait_menu.BaitMenu(self))
             if not closed:
-                raise Recoverable("o menu do jogo continua aberto", self._safe_shot())
+                raise Recoverable(i18n._("o menu do jogo continua aberto"), self._safe_shot())
         if not self._baits_on() or self.cycles < self._bait_retry_at:
             return
         c = self.cfg["baits"]
@@ -714,7 +716,7 @@ class Fisher:
         order, infinite = list(c["order"]), list(c["infinite"])
         self.bait_check_requested = False
         menu = bait_menu.BaitMenu(self)
-        self.cb.status("Conferindo as iscas no inventário...")
+        self.cb.status(i18n._("Conferindo as iscas no inventário..."))
         try:
             menu.open()
             infos = {name: menu.inspect(name) for name in order}
@@ -737,7 +739,7 @@ class Fisher:
                 self.baits.save(self.bait_path)
             self._report_bait()
         if not closed:
-            raise Recoverable("o menu do jogo não fechou", self._safe_shot())
+            raise Recoverable(i18n._("o menu do jogo não fechou"), self._safe_shot())
 
     def _close_menu(self, menu) -> bool:
         """Fecha o menu. Enquanto ele estiver aberto a pesca não aperta nenhuma tecla."""
@@ -758,7 +760,7 @@ class Fisher:
         if best is None:
             if not self._no_bait_warned:
                 self._no_bait_warned = True
-                msg = "Acabaram as iscas: continuando a pescar sem isca. Compre mais quando voltar."
+                msg = i18n._("Acabaram as iscas: continuando a pescar sem isca. Compre mais quando voltar.")
                 log.warning(msg)
                 self._notify("⚠️ " + msg)
             return
@@ -770,9 +772,10 @@ class Fisher:
             return
         st.equipped = best
         if current and not current_ok:
-            msg = f"A isca {current} acabou: troquei para {best}. Compre mais quando voltar."
+            msg = i18n._("A isca {current} acabou: troquei para {best}. Compre mais quando voltar.",
+                    current=current, best=best)
         else:
-            msg = f"Isca trocada: {current or 'nenhuma'} → {best}."
+            msg = i18n._("Isca trocada: {current} → {best}.", current=current or i18n._("nenhuma"), best=best)
         log.warning(msg)
         self._notify("🎣 " + msg)
         self.cb.status(msg)
@@ -789,7 +792,8 @@ class Fisher:
         if not self.minigame():
             self.failed_casts += 1
             limit = int(self.cfg["limits"]["max_failed_casts"])
-            self.cb.status(f"Nenhum peixe mordeu ({self.failed_casts}/{limit}). Tentando de novo...")
+            self.cb.status(i18n._("Nenhum peixe mordeu ({n}/{limit}). Tentando de novo...",
+                            n=self.failed_casts, limit=limit))
             if self.after_relog:
                 self._relog_failed += 1
                 if self._relog_failed >= int(self.cfg["limits"].get("after_relog_failed_casts", 10)):
@@ -797,7 +801,8 @@ class Fisher:
             if self.failed_casts >= limit:
                 self.failed_casts = 0
                 _, img = self.frame()
-                raise Recoverable(f"{limit} lançamentos seguidos sem minigame (caiu na água? vara presa?)", img)
+                raise Recoverable(i18n._("{limit} lançamentos seguidos sem minigame (caiu na água? vara presa?)",
+                                   limit=limit), img)
             return
         self.failed_casts = 0
         self.collect()
@@ -824,12 +829,12 @@ class Fisher:
     def _stop_far_from_water(self) -> None:
         """Reconectou e nenhum lançamento pegou peixe: nasceu longe da água (spawn setado no lugar
         errado). Recuperar não adianta; para e avisa (Ewerton 25/09: 40 lançamentos vazios)."""
-        msg = ("depois de reconectar, nenhum lançamento pegou peixe: o personagem nasceu longe da água. "
+        msg = i18n._("depois de reconectar, nenhum lançamento pegou peixe: o personagem nasceu longe da água. "
                "Sete o spawn no ponto de pesca (aba Relog)")
         log.error(msg)
         self._notify(f"🛑 {msg}.")
         self.stop_for_good = True
-        raise StopRun("Parei: " + msg + ".")
+        raise StopRun(i18n._("Parei: {msg}.", msg=msg))
 
     def _set_spawn_if_needed(self) -> None:
         """Seta o spawn no ponto de pesca: a pedido (botão) ou sozinho, uma vez, quando o auto
@@ -842,18 +847,18 @@ class Fisher:
         if not (self.spawn_requested or auto):
             return
         self.spawn_requested, self._spawn_tried = False, True
-        self.cb.status("Setando o spawn no ponto de pesca...")
+        self.cb.status(i18n._("Setando o spawn no ponto de pesca..."))
         result = relog_bridge.set_spawn(self)
         if result.ok:
             r["spawn_set"] = True
             log.info("Spawn setado no ponto de pesca.")
-            self._notify("📍 Spawn setado no ponto de pesca (o auto relog volta para cá).", ping=False)
+            self._notify(i18n._("📍 Spawn setado no ponto de pesca (o auto relog volta para cá)."), ping=False)
         else:
             log.warning("Não consegui setar o spawn: %s", result.reason)
             # 24/09 (Ewerton, 1920x1080): falhou depois de digitar "set" e não ficou print nenhum
             logbook.save_evidence(self._safe_shot(), "spawn " + result.reason)
-            self._notify(f"⚠️ Não consegui setar o spawn: {result.reason}. Sete na mão e marque "
-                         "'Já setei o spawn'.", ping=False)
+            self._notify(i18n._("⚠️ Não consegui setar o spawn: {reason}. Sete na mão e marque "
+                         "'Já setei o spawn'.", reason=i18n._(result.reason)), ping=False)
         self.cb.spawn_set(result.ok)
 
     def _log_stats(self) -> None:
@@ -873,13 +878,16 @@ class Fisher:
         logbook.save_evidence(img, msg)
         if self.recoveries > limit:
             log.error("Desistindo depois de %d recuperações seguidas: %s", limit, msg)
-            self._notify(f"🛑 Macro parou depois de {limit} tentativas de recuperação: {msg}")
-            raise StopRun(f"Parei: {msg} ({limit} tentativas sem sucesso).")
+            self._notify(i18n._("🛑 Macro parou depois de {limit} tentativas de recuperação: {msg}",
+                          limit=limit, msg=msg))
+            raise StopRun(i18n._("Parei: {msg} ({limit} tentativas sem sucesso).", msg=msg, limit=limit))
         wait = self.t("recovery_wait_sec")
         log.error("Recuperação %d/%d: %s. Tentando de novo em %.0fs.", self.recoveries, limit, msg, wait)
-        self._notify(f"⚠️ {msg}. Tentando de novo em {wait:.0f}s ({self.recoveries}/{limit}).",
+        self._notify(i18n._("⚠️ {msg}. Tentando de novo em {wait:.0f}s ({n}/{limit}).",
+                      msg=msg, wait=wait, n=self.recoveries, limit=limit),
                      ping=self.recoveries == 1)
-        self.cb.status(f"Recuperando ({self.recoveries}/{limit}): {msg}. Nova tentativa em {wait:.0f}s.")
+        self.cb.status(i18n._("Recuperando ({n}/{limit}): {msg}. Nova tentativa em {wait:.0f}s.",
+                        n=self.recoveries, limit=limit, msg=msg, wait=wait))
         self._wait_with_anti_idle(wait)
 
     def _safe_shot(self) -> np.ndarray | None:
@@ -893,17 +901,17 @@ class Fisher:
         """Roda até parar. Devolve o motivo da parada."""
         self._stop = stop
         if not self.cfg.get("cast_point"):
-            return "Marque o ponto de lançamento primeiro (F2)."
+            return i18n._("Marque o ponto de lançamento primeiro (F2).")
         self.hwnd = window.find_roblox()
         if self.hwnd is None:
-            return "Roblox não encontrado. Abra o jogo."
+            return i18n._("Roblox não encontrado. Abra o jogo.")
         window.focus(self.hwnd)
         window.keep_awake(True)
         self.grabber = screen.Grabber()
         log.info("==== Início: janela %s, ponto %s, área %s, trava bússola=%s ====",
                  window.client_rect(self.hwnd), self.cfg["cast_point"], self.cfg["scan_area"],
                  bool(self.cfg.get("compass_lock")) and self.compass.ready)
-        reason = "Parado."
+        reason = i18n._("Parado.")
         self._report_bait()
         try:
             while True:
@@ -917,9 +925,10 @@ class Fisher:
                     raise
                 except Exception as exc:  # bug inesperado: registra tudo e segue pescando
                     log.exception("Erro inesperado no ciclo %d", self.cycles)
-                    self._recover(f"erro inesperado ({type(exc).__name__}: {exc})", self._safe_shot())
+                    self._recover(i18n._("erro inesperado ({tipo}: {exc})", tipo=type(exc).__name__, exc=exc),
+                                  self._safe_shot())
         except StopRun as exc:
-            reason = str(exc) or "Parado."
+            reason = str(exc) or i18n._("Parado.")
             return reason
         finally:
             window.keep_awake(False)

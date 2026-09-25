@@ -5,6 +5,7 @@ import tkinter as tk
 from typing import Callable
 
 from config import PARTY_ZONE
+from i18n import _
 from window import Rect
 
 MIN_AREA_PX = 30
@@ -36,12 +37,12 @@ class PointPicker(tk.Toplevel):
         canvas.create_rectangle(z["x0"] * game.w, z["y0"] * game.h, z["x1"] * game.w, z["y1"] * game.h,
                                 outline=PARTY_COLOR, width=3, fill=PARTY_COLOR, stipple="gray25")
         canvas.create_text(z["x1"] * game.w / 2, z["y0"] * game.h - 14, fill=PARTY_COLOR,
-                           text="party: não clica aqui", font=("Segoe UI", 12, "bold"))
-        canvas.create_text(game.w / 2, 60, text=prompt + "\nClique para marcar  •  Esc cancela",
+                           text=_("party: não clica aqui"), font=("Segoe UI", 12, "bold"))
+        canvas.create_text(game.w / 2, 60, text=prompt + _("\nClique para marcar  •  Esc cancela"),
                            fill=BANNER_FG, font=("Segoe UI", 18, "bold"), justify="center")
         canvas.bind("<Button-1>", self._click)
         # Botão de cancelar visível: o Esc pode não chegar se o Roblox estiver com o teclado.
-        cancel = tk.Button(canvas, text="✖ Cancelar", command=lambda: self._finish(None), bg=CANCEL_COLOR,
+        cancel = tk.Button(canvas, text=_("✖ Cancelar"), command=lambda: self._finish(None), bg=CANCEL_COLOR,
                            fg="white", relief="flat", font=("Segoe UI", 12, "bold"), cursor="hand2")
         canvas.create_window(game.w / 2, 120, window=cancel)
         self.bind("<Escape>", lambda _e: self._finish(None))
@@ -84,13 +85,13 @@ class AreaPicker(tk.Toplevel):
         # Botões de verdade: Enter/Esc não chegam aqui quando o Roblox está com o teclado.
         buttons = tk.Frame(inner, bg=BANNER_BG)
         buttons.pack(side="bottom", fill="x", padx=2, pady=4)
-        tk.Button(buttons, text="✔ Salvar", command=self._save, bg=SAVE_COLOR, fg="white",
+        tk.Button(buttons, text=_("✔ Salvar"), command=self._save, bg=SAVE_COLOR, fg="white",
                   activebackground=SAVE_COLOR, relief="flat", font=("Segoe UI", 9, "bold"),
                   cursor="hand2").pack(fill="x", pady=(0, 3))
-        tk.Button(buttons, text="✖ Cancelar", command=lambda: self._finish(None), bg=CANCEL_COLOR,
+        tk.Button(buttons, text=_("✖ Cancelar"), command=lambda: self._finish(None), bg=CANCEL_COLOR,
                   fg="white", activebackground=CANCEL_COLOR, relief="flat", font=("Segoe UI", 9),
                   cursor="hand2").pack(fill="x")
-        label = tk.Label(inner, text="Barra do\nminigame\n\nArraste\npara mover\n\nCanto de\nbaixo =\ntamanho",
+        label = tk.Label(inner, text=_("Barra do\nminigame\n\nArraste\npara mover\n\nCanto de\nbaixo =\ntamanho"),
                          bg=BANNER_BG, fg=BANNER_FG, font=("Segoe UI", 9, "bold"))
         label.pack(expand=True)
         for wdg in (self, inner, label):

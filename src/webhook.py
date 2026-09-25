@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import cv2
 import numpy as np
 
+import i18n
 import logbook
 
 WEBHOOK_RE = re.compile(r"^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$")
@@ -74,13 +75,14 @@ class LootReport:
 def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], when: datetime) -> dict:
     rarity = report.rarity if report.rarity in RARITY_COLORS else "common"
     fields = [
-        {"name": "Raridade", "value": RARITY_LABELS[rarity], "inline": True},
-        {"name": "Deste item na sessão", "value": str(report.item_total), "inline": True},
-        {"name": "Itens na sessão", "value": str(report.session_count), "inline": True},
+        {"name": i18n._("Raridade"), "value": RARITY_LABELS[rarity], "inline": True},
+        {"name": i18n._("Deste item na sessão"), "value": str(report.item_total), "inline": True},
+        {"name": i18n._("Itens na sessão"), "value": str(report.session_count), "inline": True},
     ]
     if report.tracked_name:
-        fields.append({"name": f"{report.tracked_name} total", "value": str(report.tracked_total), "inline": True})
-    fields.append({"name": "Tempo rodando", "value": report.elapsed, "inline": True})
+        fields.append({"name": i18n._("{name} total", name=report.tracked_name),
+                       "value": str(report.tracked_total), "inline": True})
+    fields.append({"name": i18n._("Tempo rodando"), "value": report.elapsed, "inline": True})
     embed = {
         "title": ("🆕 " if report.is_new else "") + f"{report.name}  x{report.quantity}",
         "color": RARITY_COLORS[rarity],
@@ -89,9 +91,9 @@ def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], whe
     }
     notes = []
     if report.is_new:
-        notes.append("Item novo na coleção!")
+        notes.append(i18n._("Item novo na coleção!"))
     if report.first_in_catalog:
-        notes.append("📖 Primeira vez no catálogo da macro.")
+        notes.append(i18n._("📖 Primeira vez no catálogo da macro."))
     if notes:
         embed["description"] = "\n".join(notes)
     if report.image is not None:
@@ -99,7 +101,7 @@ def build_payload(report: LootReport, user_id: str, ping_rarities: set[str], whe
     payload = {"embeds": [embed], "allowed_mentions": {"parse": []}}
     if rarity in ping_rarities and valid_user_id(user_id):
         uid = user_id.strip()
-        payload["content"] = f"<@{uid}> pegou um **{RARITY_LABELS[rarity].upper()}**!"
+        payload["content"] = i18n._("<@{uid}> pegou um **{rarity}**!", uid=uid, rarity=RARITY_LABELS[rarity].upper())
         payload["allowed_mentions"] = {"users": [uid]}
     return payload
 
@@ -136,11 +138,11 @@ def post(url: str, payload: dict, png: bytes | None = None) -> None:
                 time.sleep(float(retry) + 0.1)
                 continue
             if exc.code in (401, 404):
-                raise RuntimeError("Webhook inválido ou apagado (confira o link).") from exc
-            raise RuntimeError(f"Discord recusou o envio (HTTP {exc.code}).") from exc
+                raise RuntimeError(i18n._("Webhook inválido ou apagado (confira o link).")) from exc
+            raise RuntimeError(i18n._("Discord recusou o envio (HTTP {code}).", code=exc.code)) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(f"Sem conexão com o Discord: {exc.reason}") from exc
-    raise RuntimeError("Discord limitou os envios; tente de novo mais tarde.")
+            raise RuntimeError(i18n._("Sem conexão com o Discord: {reason}", reason=exc.reason)) from exc
+    raise RuntimeError(i18n._("Discord limitou os envios; tente de novo mais tarde."))
 
 
 class DiscordNotifier:
