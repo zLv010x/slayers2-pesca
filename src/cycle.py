@@ -31,7 +31,7 @@ import window
 from bar_control import TrackController
 from bar_detect import Detector
 from baits import BaitState
-from catalog import Catalog
+from catalog import PENDING_PROMOTE, Catalog
 from compass import CompassLock
 from restart_policy import RestartPolicy
 from session import Session
@@ -517,7 +517,7 @@ class Fisher:
                   ) -> tuple[list[loot_mod.Loot], np.ndarray | None]:
         while time.perf_counter() < until:
             _, img = self.frame()
-            fresh = loot_mod.new_items(before, loot_mod.read_popups(img))
+            fresh = loot_mod.new_items(before, loot_mod.read_popups(img, known=self._known()))
             if fresh:
                 return fresh, img
             self.sleep(POPUP_POLL_SEC)
@@ -545,7 +545,7 @@ class Fisher:
                 variant = loot_mod.OCR_VARIANTS[polls % len(loot_mod.OCR_VARIANTS)]
                 polls += 1
                 quick = loot_mod.read_popups(img, variants=(variant,), best=False)
-                fresh = loot_mod.new_items(before, loot_mod.read_popups(img)) if quick else []
+                fresh = loot_mod.new_items(before, loot_mod.read_popups(img, known=self._known())) if quick else []
                 if fresh:
                     if restarts:
                         log.info("Item pego %s depois de %d recomeço(s) do T.", where, restarts)
@@ -604,7 +604,7 @@ class Fisher:
         self.sleep(self.t("after_minigame_sec"))
         # Avisos de pescas anteriores ainda na tela não podem ser contados de novo.
         _, img = self.frame()
-        before = loot_mod.read_popups(img)
+        before = loot_mod.read_popups(img, known=self._known())
         fresh, img = self._hold_t(before, self.t("collect_timeout_sec"), "da vara")
         if not fresh and self.cfg.get("ground_pickup", True):
             self._drop_rod()
@@ -613,7 +613,7 @@ class Fisher:
                 log.info("Item recuperado do chão.")
         if before:
             log.debug("Avisos antigos ainda na tela: %s", [f"{i.name} x{i.quantity}" for i in before])
-        fresh = [self._report(item, img) for item in fresh]
+        fresh = [done for done in (self._report(item, img) for item in fresh) if done is not None]
         if not fresh:
             self.session.record_miss()
             log.warning("Nenhum aviso de item depois do T (drop perdido ou aviso não lido).")
@@ -631,13 +631,24 @@ class Fisher:
     def _card_image(self, name: str) -> np.ndarray | None:
         return self.catalog.card_image(name) if self.catalog is not None else None
 
-    def _report(self, item: loot_mod.Loot, img: np.ndarray) -> loot_mod.Loot:
+    def _known(self):
+        """Reconhecedor de nomes para o loot escolher a leitura certa entre as variantes do OCR."""
+        return self.catalog.knows if self.catalog is not None else None
+
+    def _report(self, item: loot_mod.Loot, img: np.ndarray) -> loot_mod.Loot | None:
         """Passa o item pelo catálogo (nome/raridade/imagem da ficha), registra e avisa.
-        Devolve o item corrigido."""
+        Devolve o item corrigido, ou None se o nome não existe (lixo ou aguardando confirmar)."""
         snap = loot_mod.item_snapshot(img, item)
         first_in_catalog = False
         if self.catalog is not None:
-            rec = self.catalog.record(item.name, item.rarity, snap)
+            rec = self.catalog.record(item.name, item.rarity, snap, confirmed=not item.lone)
+            if not rec.accepted:
+                if rec.pending:
+                    log.info("Nome desconhecido aguardando confirmar (%d/%d vezes), não mostrado: %r",
+                             rec.pending, PENDING_PROMOTE, item.name)
+                else:
+                    log.info("Nome lido não é item (lixo do OCR), ignorado: %r", item.name)
+                return None
             if rec.corrected:
                 log.info("Nome corrigido pelo catálogo: %r -> %r", item.name, rec.name)
             if rec.first_time:

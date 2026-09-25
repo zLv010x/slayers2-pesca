@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Callable
 
 import cv2
 import numpy as np
 
 import ocr
-from catalog import plausible_name
+from catalog import fix_ocr, normalize, plausible_name
+
+# Reconhecedor opcional de nomes (o catálogo: "esse nome lido é um item conhecido?").
+Known = Callable[[str], bool]
 
 # Área onde o aviso aparece: à direita do personagem, que fica no centro da tela.
 REGION_X = (0.49, 0.80)
@@ -31,6 +35,10 @@ MIN_NAME_LEN = 2
 QTY_SIDE_REACH = 4
 LEADING_STRAY_RX = re.compile(r"^\S\s+(?=\S{3,})")
 NAME_EDGE_JUNK = re.compile(r"^[^\w(]+|[^\w)!?]+$")
+# Nome partido em duas linhas pelo OCR ("Zebra" + "Fish", "6>Meta" + "Iscraps"): pedaços na
+# mesma altura e quase encostados são o mesmo aviso (os avisos se empilham um embaixo do outro).
+SPLIT_MAX_GAP = 1.5   # alturas de letra entre o fim de um pedaço e o começo do outro
+SPLIT_MAX_DY = 0.5    # diferença entre o meio das duas linhas, em alturas de letra
 # Texto dos avisos é branco; ampliar 2x ajuda a ler o "xN" pequeno.
 WHITE_TEXT_MIN = 200
 OCR_UPSCALE = 2
@@ -79,6 +87,7 @@ class Loot:
     rarity: str
     box: tuple[int, int, int, int]  # x, y, w, h na imagem inteira
     is_new: bool = False            # primeira vez na coleção (selo amarelo "NEW!")
+    lone: bool = False              # só uma das variantes do OCR leu esse nome (desconfiado)
 
 
 def _parse_qty(text: str) -> int | None:
@@ -258,30 +267,86 @@ def _name_score(items: list[Loot]) -> int:
                for i in items)
 
 
-def read_popups(frame: np.ndarray, variants=OCR_VARIANTS, best: bool = True) -> list[Loot]:
+def _name_key(name: str) -> str:
+    return normalize(fix_ocr(name))
+
+
+def read_popups(frame: np.ndarray, variants=OCR_VARIANTS, best: bool = True,
+                known: Known | None = None) -> list[Loot]:
     """Todos os avisos de item visíveis (eles se empilham, um embaixo do outro).
 
-    best=True: roda todas as variantes e fica com a leitura mais completa/limpa.
+    best=True: roda todas as variantes e fica com a leitura em que o catálogo (known) reconhece
+    mais nomes; no empate, a mais completa/limpa. A mais comprida sozinha escolhia lixo:
+    "J V uaJZebra Fish" ganhava de "Zebra Fish", "C r LI Stad o II" de "Crustadon".
+    Marca `lone` no nome que só uma variante leu.
     best=False: para na primeira variante que achar algo (para checagens rápidas).
     """
     results = []
     for threshold, upscale in variants:
-        found = _read_popups_once(frame, threshold, upscale)
+        found = _read_popups_once(frame, threshold, upscale, known=known)
         if found:
             if not best:
                 return found
             results.append(found)
     if not results:
         return []
-    return max(results, key=lambda r: (len(r), _name_score(r)))
+    recognized = (lambda items: sum(1 for i in items if known(i.name))) if known else (lambda items: 0)
+    chosen = max(results, key=lambda r: (recognized(r), len(r), _name_score(r)))
+    if len(variants) < 2:
+        return chosen
+    readings = [{_name_key(i.name) for i in r} for r in results]
+    return [replace(i, lone=True) if sum(_name_key(i.name) in keys for keys in readings) == 1 else i
+            for i in chosen]
 
 
-def _read_popups_once(frame: np.ndarray, threshold: int | None, upscale: int) -> list[Loot]:
+def _same_row(left: ocr.Line, right: ocr.Line) -> bool:
+    h = max(left.h, right.h)
+    gap = right.x - (left.x + left.w)
+    dy = abs((left.y + left.h / 2) - (right.y + right.h / 2))
+    return -h / 2 <= gap <= SPLIT_MAX_GAP * h and dy <= SPLIT_MAX_DY * h
+
+
+def _join(left: ocr.Line, right: ocr.Line) -> ocr.Line:
+    x0, y0 = min(left.x, right.x), min(left.y, right.y)
+    x1 = max(left.x + left.w, right.x + right.w)
+    y1 = max(left.y + left.h, right.y + right.h)
+    return ocr.Line(f"{left.text} {right.text}", x0, y0, x1 - x0, y1 - y0)
+
+
+def _should_join(left: ocr.Line, right: ocr.Line, known: Known | None) -> bool:
+    """Sem catálogo junta sempre; com ele, não estraga um nome reconhecido com texto do lado."""
+    if known is None or known(clean_name(f"{left.text} {right.text}")):
+        return True
+    return not (known(clean_name(left.text)) or known(clean_name(right.text)))
+
+
+def _join_split_names(lines: list[ocr.Line], known: Known | None = None) -> list[ocr.Line]:
+    """Junta os pedaços de um nome partido em linhas lado a lado (a ordem das linhas fica)."""
+    done = [False] * len(lines)
+    out = []
+    for i, line in enumerate(lines):
+        if done[i]:
+            continue
+        if _parse_qty(line.text) is None:
+            for j in range(i + 1, len(lines)):
+                other = lines[j]
+                if done[j] or _parse_qty(other.text) is not None:
+                    continue
+                left, right = sorted((line, other), key=lambda item: item.x)
+                if _same_row(left, right) and _should_join(left, right, known):
+                    line, done[j] = _join(left, right), True
+        out.append(line)
+    return out
+
+
+def _read_popups_once(frame: np.ndarray, threshold: int | None, upscale: int,
+                      known: Known | None = None) -> list[Loot]:
     fh, fw = frame.shape[:2]
     rx0, rx1 = int(REGION_X[0] * fw), int(REGION_X[1] * fw)
     ry0, ry1 = int(REGION_Y[0] * fh), int(REGION_Y[1] * fh)
     region = frame[ry0:ry1, rx0:rx1]
     lines = ocr.read_lines(_white_text(region, threshold), min_height=upscale * region.shape[0])
+    lines = _join_split_names(lines, known)
     found: list[Loot] = []
     for line in lines:
         name = clean_name(line.text)

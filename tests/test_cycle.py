@@ -1074,3 +1074,38 @@ def test_toda_espera_da_pesca_da_sinal_de_vida_ao_cao_de_guarda():
     f.on_beat = lambda: beats.append(1)
     f.sleep(0.05)
     assert len(beats) >= 2
+
+
+def test_nome_que_nao_existe_nao_vai_para_janela_historico_nem_discord(tmp_path, monkeypatch):
+    """25/09: "xg•.ollec" (pedaço do botão Collect) e "Clovurn Fish" apareciam como itens."""
+    import json
+
+    import numpy as np
+
+    from catalog import Catalog
+    from loot import Loot
+    from session import Session
+    shared = tmp_path / "catalogo"
+    shared.mkdir()
+    item = {"name": "Clown Fish", "slug": "clown-fish", "image": None, "rarity": "rare",
+            "rarity_votes": {}, "aliases": []}
+    (shared / "itens.json").write_text(json.dumps({"items": [item]}), encoding="utf-8")
+    sent, shown = [], []
+    f = FakeFisher([True, True])
+    f.catalog = Catalog(shared, tmp_path / "catalogo_local")
+    f.session = Session(log_dir=tmp_path)
+    f.notifier = type("N", (), {"send_loot": lambda self, r: sent.append(r)})()
+    f.cb.loot = lambda items, snap: shown.append([i.name for i in items])
+    f.cfg["timings"]["after_minigame_sec"] = 0
+    f.cfg["timings"]["after_collect_sec"] = 0
+    monkeypatch.setattr(cycle.loot_mod, "read_popups", lambda img, **kw: [])
+    monkeypatch.setattr(cycle.loot_mod, "item_snapshot", lambda img, it: np.zeros((20, 60, 3), np.uint8))
+    box = (0, 0, 1, 1)
+    f._hold_t = lambda before, budget, where: ([Loot("Clov.tn Fish", 1, "rare", box),
+                                                Loot("xg•.ollec", 1, "common", box),
+                                                Loot("Clovurn Fish", 1, "rare", box, lone=True)], None)
+    got = f.collect()
+    assert [i.name for i in got] == ["Clown Fish"]
+    assert [r.name for r in sent] == ["Clown Fish"]
+    assert shown == [["Clown Fish"]]
+    assert f.session.catches == 1

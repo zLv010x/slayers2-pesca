@@ -239,3 +239,111 @@ def test_nome_sem_letras_suficientes_e_lixo():
     assert loot.plausible_name("Ore")
     assert loot.plausible_name("Zebra Fish")
     assert loot.plausible_name("OuwFish")
+
+
+# --- nomes que não existem (25/09) ---------------------------------------------------
+# Recortes reais do catálogo local do usuário (item_snapshot de leituras erradas) postos de volta
+# num quadro do tamanho da tela, no lugar onde o aviso aparece.
+
+def _no_quadro(recorte, largura=1920, altura=1080):
+    borda = np.concatenate([recorte[0], recorte[-1], recorte[:, 0], recorte[:, -1]])
+    quadro = np.empty((altura, largura, 3), np.uint8)
+    quadro[:] = np.median(borda, axis=0).astype(np.uint8)
+    x0, y0 = int(0.55 * largura), int(0.45 * altura)
+    quadro[y0:y0 + recorte.shape[0], x0:x0 + recorte.shape[1]] = recorte
+    return quadro
+
+
+@pytest.fixture
+def conhecido():
+    """Reconhecedor com o catálogo compartilhado do repositório (só leitura)."""
+    from pathlib import Path
+
+    from catalog import Catalog
+    repo = Path(__file__).resolve().parent.parent / "catalogo"
+    return Catalog(repo, repo.with_name("sem_local_no_teste")).knows
+
+
+@pytest.mark.parametrize("recorte", ["aviso_lido_errado_crustadon_1.png", "aviso_lido_errado_crustadon_2.png"])
+def test_prefere_a_leitura_que_o_catalogo_reconhece(shot, conhecido, recorte):
+    # 24-25/09: a variante com mais letras ("C r LI Stad o II", "rufitaclon") ganhava de outra
+    # variante que tinha lido "Crustadon" certinho
+    import loot
+    quadro = _no_quadro(shot(recorte))
+    nomes = [i.name for i in loot.read_popups(quadro, known=conhecido)]
+    assert len(nomes) == 1 and conhecido(nomes[0]), nomes
+
+
+def test_sem_reconhecedor_escolhe_como_antes(monkeypatch):
+    import loot
+    por_variante = {
+        (200, 2): [loot.Loot("J V uaJZebra Fish", 1, "rare", (0, 0, 10, 10))],
+        (155, 3): [loot.Loot("Zebra Fish", 1, "rare", (0, 0, 10, 10))],
+    }
+    monkeypatch.setattr(loot, "_read_popups_once", lambda frame, thr, up, known=None: por_variante[(thr, up)])
+    variantes = tuple(por_variante)
+    assert loot.read_popups(None, variants=variantes)[0].name == "J V uaJZebra Fish"
+    escolhido = loot.read_popups(None, variants=variantes, known=lambda n: n == "Zebra Fish")
+    assert escolhido[0].name == "Zebra Fish"
+
+
+def test_marca_nome_lido_por_uma_variante_so(monkeypatch):
+    import loot
+    caixa = (0, 0, 10, 10)
+    por_variante = {
+        (200, 2): [loot.Loot("Shotgun Schematic", 1, "legendary", caixa), loot.Loot("Clovurn Fish", 1, "rare", caixa)],
+        (155, 3): [loot.Loot("Shotgun Schematic", 1, "legendary", caixa), loot.Loot("Clown Fish", 1, "rare", caixa)],
+        (None, 3): [],
+    }
+    monkeypatch.setattr(loot, "_read_popups_once", lambda frame, thr, up, known=None: por_variante[(thr, up)])
+    itens = loot.read_popups(None, variants=tuple(por_variante))
+    assert [(i.name, i.lone) for i in itens] == [("Shotgun Schematic", False), ("Clovurn Fish", True)]
+    # uma variante só rodando (checagem rápida): não dá para comparar, não marca
+    rapido = loot.read_popups(None, variants=((200, 2),), best=False)
+    assert not any(i.lone for i in rapido)
+
+
+def test_nome_partido_em_duas_linhas_vira_um_aviso_so(monkeypatch):
+    # 24/09 22:44 (usuário) e 25/09 00:11 (Ewerton): "Fish" e "Zebra" do mesmo aviso viravam dois
+    # itens, cada um com o mesmo "x1"
+    import loot
+    from ocr import Line
+    linhas = [Line("Fish", 1255, 600, 40, 20), Line("Zebra", 1200, 603, 50, 20), Line("x1", 1240, 628, 16, 12)]
+    monkeypatch.setattr(loot.ocr, "read_lines", lambda img, min_height=0: [
+        Line(l.text, l.x - 940, l.y - 270, l.w, l.h) for l in linhas])
+    monkeypatch.setattr(loot, "popup_rarity", lambda *a, **kw: "rare")
+    quadro = np.zeros((1080, 1920, 3), np.uint8)
+    itens = loot._read_popups_once(quadro, 200, 2)
+    assert [(i.name, i.quantity) for i in itens] == [("Zebra Fish", 1)]
+    assert itens[0].box == (1200, 600, 95, 23)
+
+
+def test_nao_junta_nome_reconhecido_com_texto_ao_lado(monkeypatch):
+    import loot
+    from ocr import Line
+    linhas = [Line("Zebra Fish", 1200, 600, 95, 20), Line("Olá", 1310, 600, 30, 20), Line("x1", 1240, 628, 16, 12)]
+    monkeypatch.setattr(loot.ocr, "read_lines", lambda img, min_height=0: [
+        Line(l.text, l.x - 940, l.y - 270, l.w, l.h) for l in linhas])
+    monkeypatch.setattr(loot, "popup_rarity", lambda *a, **kw: "rare")
+    quadro = np.zeros((1080, 1920, 3), np.uint8)
+    itens = loot._read_popups_once(quadro, 200, 2, known=lambda n: n == "Zebra Fish")
+    assert "Zebra Fish" in [i.name for i in itens]
+
+
+def test_limpeza_do_nome_nao_corta_letras_de_leitura_cortada():
+    # "uwFvvesh" = OuwFwesh sem o "O": quem decide se o começo é sujeira é o catálogo
+    from loot import clean_name
+    assert clean_name("uwFvvesh") == "uwFvvesh"
+    assert clean_name("zMythic Refinement Ore") == "zMythic Refinement Ore"
+
+
+def test_pedaco_do_botao_collect_nao_vira_aviso(shot):
+    # 25/09: "xg•.ollec" = "Golde(n Fish) / Collect" do item no chão, com o "x1" de outro aviso perto
+    import loot
+    assert loot.read_popups(_no_quadro(shot("aviso_botao_collect_golden.png"))) == []
+
+
+def test_item_novo_de_verdade_continua_sendo_lido(shot, conhecido):
+    import loot
+    itens = loot.read_popups(_no_quadro(shot("aviso_item_novo_shotgun_schematic.png")), known=conhecido)
+    assert [(i.name, i.lone) for i in itens] == [("Shotgun Schematic", False)]
