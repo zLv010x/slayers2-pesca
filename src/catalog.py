@@ -10,7 +10,11 @@ A macro usa o catálogo para:
 - corrigir erros do OCR comparando com os nomes conhecidos ("Golden Fisn" -> "Golden Fish");
 - dar a FICHA do item para o aviso (Discord e janela): nome certo, imagem e raridade.
   A raridade escrita no compartilhado manda (dá para corrigir à mão no itens.json); item que
-  ainda não está lá usa a raridade mais vista nas leituras da cor.
+  ainda não está lá usa a raridade mais vista nas leituras da cor;
+- barrar nome que não existe: nome desconhecido só vira item novo se parecer nome de item.
+  Lixo da tela ("xg•.ollec" do botão Collect, "xlv" do "x1") nunca entra; nome desconfiado
+  (pedaço de um nome conhecido, sujo, ou lido por uma variante só do OCR) fica AGUARDANDO no
+  local, sem aparecer, e entra na PENDING_PROMOTE-ésima vez: item novo de verdade não some.
 
 `python src/catalog.py publicar` junta o catalogo_local no compartilhado.
 """
@@ -44,16 +48,19 @@ FUZZY_CUTOFF_LONG = 0.84
 FUZZY_LONG_LEN = 8
 FUZZY_LONG_MAX_LEN_DIFF = 2
 FUZZY_MARGIN = 0.05          # dois nomes quase iguais ao lido: não chuta nenhum
-# Sujeira do ícone grudada antes do nome ("Jzebra Fish", "GNOuwFish", "8 N Metal Scraps").
-AFFIX_MIN_LEN = 6
+# Sujeira do ícone grudada antes do nome ("Jzebra Fish", "GNOuwFish", "8 N Metal Scraps", "ggcoral").
+AFFIX_MIN_LEN = 5
 AFFIX_MAX_JUNK = 2
+# Começo do nome cortado (aviso surgindo/apagando): "ra Fish" = Zebra Fish sem "Zeb", "thulon".
+CUT_MIN_LEN = 6
+CUT_MAX_MISSING = 3
 TIDY_MAX_PASSES = 3
 # O arrumar só junta por semelhança (e só apaga pedaço de nome) o que foi visto poucas vezes:
 # "Anglerfish" pego 12 vezes é outro peixe, não "Angelfish" lido errado.
 TIDY_RARE_COUNT = 2
 TIDY_RARE_SHARE = 0.10
 TIDY_BACKUP_NAME = "itens.antes-de-arrumar.json"
-EXACT_HOWS = ("exact", "fixed", "alias", "affix")   # jeitos de achar que não são chute
+EXACT_HOWS = ("exact", "fixed", "alias", "shape", "affix", "cut")  # jeitos de achar que não são chute
 SHARED_FIELDS = ("name", "slug", "image", "rarity", "rarity_votes", "aliases")
 RARITIES = ("common", "rare", "epic", "legendary", "mythic")
 # Nome de item tem pelo menos 3 letras ("Ore"): "6d" (prazo dos códigos no menu principal)
@@ -62,12 +69,40 @@ MIN_NAME_LETTERS = 3
 IGNORED_NAMES = {"item", "collect", "new"}
 PROMPT_WORD = "collect"      # o botão "Collect" lido torto ("Cotlect", "lollect")
 PROMPT_CUTOFF = 0.8
+# Pedaço do botão com sujeira ("xg•.ollec" -> "xgollec"): 5-6 letras seguidas de "collect" e
+# até 2 a mais. Com 4 não ("Pollen", "Select" podem ser itens); a palavra inteira também não
+# ("Collector").
+PROMPT_PIECE_MIN = 5
+PROMPT_PIECE_MAX_EXTRA = 2
+# O "x1" embaixo do nome lido como nome ("xlv", "xl -SE", "XXI"); "Xiphos" (6 letras) passa.
+QTY_LIKE_RX = re.compile(r"^\W*[xX×]{1,2}\s*[lI1i|]")
+QTY_LIKE_MAX_LETTERS = 4
+VOWELS = frozenset("aeiouy")  # nome de item sempre tem vogal ("mxl", "XC. c.llé.:l" não)
+# Nome desconhecido desconfiado vira item novo quando for visto tantas vezes (fica aguardando).
+PENDING_PROMOTE = 3
+# Nome novo "limpo": palavras de 3+ letras com Maiúscula+minúscula no começo ("OuwFish", "Ore";
+# "FIF", "ROre" não), apóstrofo só no "'s" do fim ("Clovu'll" não), ou número. ASCII.
+NAME_WORD_RX = re.compile(r"[A-Z][a-z][A-Za-z]+(?:'s)?|[0-9]+")
+NAME_SMALL_WORDS = frozenset({"of", "the", "and", "a", "an", "on", "in", "to",
+                              "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"})
+# Sujeira minúscula grudada antes da inicial maiúscula de um item NOVO ("zMythic Refinement Ore").
+# Só no nome do item novo: em leitura cortada ("uwFvvesh" = OuwFwesh sem o "O") são letras de verdade.
+LOWER_JUNK_RX = re.compile(r"^[a-z]{1,2}(?=[A-Z][a-z])")
 # Trocas típicas do OCR do Windows nesta fonte: o "w" vira "v.t", "vt.t", "v.r", "v•j", "vv".
 OCR_FIXES = (
     (re.compile(r"v(?:t?[^\w\s]+[tjri]|v)", re.IGNORECASE), "w"),
     (re.compile(r"\$"), "s"),
     (re.compile(r"0"), "o"),
     (re.compile(r"1"), "l"),
+)
+# "Esqueleto" do nome: letras que o OCR confunde viram a mesma, nos DOIS lados da comparação
+# ("C r LI stado" -> "crustado", "Crustaclon" -> "crustadon", "KrathLtlon" -> "krathulon").
+SHAPE_RULES = (
+    (re.compile(r"[il|!]"), "l"),
+    (re.compile(r"rn"), "m"),
+    (re.compile(r"cl"), "d"),
+    (re.compile(r"l[lt]"), "u"),
+    (re.compile(r"5"), "s"),
 )
 
 
@@ -81,14 +116,44 @@ def fix_ocr(name: str) -> str:
     return name
 
 
+def shape_key(name: str) -> str:
+    shape = re.sub(r"[^a-z0-9|!]", "", fix_ocr(name).lower())
+    for pattern, repl in SHAPE_RULES:
+        shape = pattern.sub(repl, shape)
+    return shape
+
+
+def _is_prompt_piece(key: str) -> bool:
+    """Pedaço do botão "Collect": "oll", "xgollec" (sujeira + "ollec")."""
+    if len(key) >= MIN_NAME_LETTERS and key in PROMPT_WORD:
+        return True
+    match = difflib.SequenceMatcher(None, key, PROMPT_WORD).find_longest_match(0, len(key), 0, len(PROMPT_WORD))
+    return PROMPT_PIECE_MIN <= match.size < len(PROMPT_WORD) and len(key) - match.size <= PROMPT_PIECE_MAX_EXTRA
+
+
 def plausible_name(name: str) -> bool:
+    """Pode ser nome de item? Barra o lixo da tela: botão Collect, selo NEW!, "x1", "6d"."""
     letters = re.sub(r"[^A-Za-z]", "", name)
     key = normalize(name)
     if len(letters) < MIN_NAME_LETTERS or key in IGNORED_NAMES:
         return False
+    if not VOWELS & set(letters.lower()):
+        return False
+    if QTY_LIKE_RX.match(name) and len(letters) <= QTY_LIKE_MAX_LETTERS:
+        return False
+    if _is_prompt_piece(key):
+        return False
     if len(key) > len(PROMPT_WORD) + 1:
         return True  # "Collector"/"Collected" podem ser itens
     return difflib.SequenceMatcher(None, key, PROMPT_WORD).ratio() < PROMPT_CUTOFF
+
+
+def looks_like_item_name(name: str) -> bool:
+    """Nome limpo como os do jogo ("Shotgun Schematic", "OuwFish"): sem símbolo, letra solta,
+    número grudado ou inicial minúscula ("TY. lon", "inent C", "C10i.*v111 Fish", "ont Ores")."""
+    words = [w for w in re.split(r"[ -]+", name.strip()) if w]
+    return (bool(words) and name.isascii() and words[0][0].isupper()
+            and all(NAME_WORD_RX.fullmatch(w) or w in NAME_SMALL_WORDS for w in words))
 
 
 def slugify(name: str) -> str:
@@ -101,6 +166,8 @@ class Recorded:
     rarity: str        # raridade mais vista desse item
     first_time: bool   # item que não estava em nenhum catálogo
     corrected: bool    # o nome lido foi corrigido
+    accepted: bool = True  # False = lixo ou nome aguardando confirmar: não mostrar nem contar
+    pending: int = 0       # nome aguardando: quantas vezes já foi visto (de PENDING_PROMOTE)
 
 
 def _load_index(path: Path) -> dict[str, dict]:
@@ -127,6 +194,27 @@ def _affix_match(key: str, entries: dict[str, dict]) -> str | None:
     fits = [k for k in entries
             if len(k) >= AFFIX_MIN_LEN and key.endswith(k) and 0 < len(key) - len(k) <= AFFIX_MAX_JUNK]
     return max(fits, key=len, default=None)
+
+
+def _cut_match(key: str, entries: dict[str, dict]) -> str | None:
+    """Um só nome conhecido termina com o que foi lido, faltando até CUT_MAX_MISSING letras.
+    A primeira letra do pedaço pode vir trocada (a borda do corte: "Dra Fish" = "(Ze)bra Fish")."""
+    for tail in (key, key[1:]):
+        if len(tail) < CUT_MIN_LEN:
+            continue
+        fits = [k for k in entries if k.endswith(tail) and 0 < len(k) - len(tail) <= CUT_MAX_MISSING]
+        if len(fits) == 1:
+            return fits[0]
+    return None
+
+
+def _shape_table(entries: dict[str, dict]) -> dict[str, str]:
+    """{esqueleto: chave}; esqueleto de dois itens ao mesmo tempo fica de fora (ambíguo)."""
+    table: dict[str, str | None] = {}
+    for key, entry in entries.items():
+        shape = shape_key(entry.get("name", key))
+        table[shape] = None if shape in table and table[shape] != key else key
+    return {shape: key for shape, key in table.items() if shape and key}
 
 
 def _fuzzy_match(key: str, entries: dict[str, dict]) -> tuple[str, bool] | None:
@@ -164,11 +252,16 @@ class Catalog:
             return self._find(name)[0] is not None
 
     def _entries(self) -> dict[str, dict]:
-        return {**self.local, **self.shared}
+        """Itens de verdade: o compartilhado e o local sem os nomes aguardando e sem o lixo que
+        versões antigas gravaram (senão eles puxam as leituras parecidas: "bra Fish" -> "ra Fish")."""
+        local = {k: e for k, e in self.local.items()
+                 if "pending" not in e and plausible_name(e.get("name", ""))}
+        return {**local, **self.shared}
 
     def _find(self, name: str, exclude: str | None = None) -> tuple[str | None, str | None]:
         """Chave do item para esse nome lido e como achou: "exact", "fixed" (trocas do OCR
-        desfeitas), "alias", "affix" (sujeira antes do nome), "fuzzy" ou "fuzzy_relaxed"."""
+        desfeitas), "alias", "shape" (mesmo esqueleto), "affix" (sujeira antes do nome), "cut"
+        (começo cortado), "fuzzy" ou "fuzzy_relaxed"."""
         keys = [k for k in dict.fromkeys((normalize(name), normalize(fix_ocr(name)))) if k]
         if not keys:
             return None, None
@@ -180,15 +273,63 @@ class Catalog:
             for k, entry in entries.items():
                 if key in {normalize(a) for a in entry.get("aliases", [])}:
                     return k, "alias"
-        for key in keys:
-            found = _affix_match(key, entries)
-            if found:
-                return found, "affix"
-        for key in keys:
-            fuzzy = _fuzzy_match(key, entries)
+        shapes = _shape_table(entries)
+        shape = shape_key(name)
+        if shape in shapes:
+            return shapes[shape], "shape"
+        for how, match in (("affix", _affix_match), ("cut", _cut_match)):
+            for key in keys:
+                found = match(key, entries)
+                if found:
+                    return found, how
+        for key, table in [*((k, entries) for k in keys), (shape, shapes)]:
+            fuzzy = _fuzzy_match(key, table)
             if fuzzy:
-                return fuzzy[0], "fuzzy_relaxed" if fuzzy[1] else "fuzzy"
+                found = fuzzy[0] if table is entries else shapes[fuzzy[0]]
+                return found, "fuzzy_relaxed" if fuzzy[1] else "fuzzy"
         return None, None
+
+    def _verdict(self, name: str, confirmed: bool) -> str:
+        """Nome que o catálogo não conhece: "junk" (nunca é item), "pending" (desconfiado:
+        aguarda ser visto de novo) ou "new" (item novo na hora)."""
+        if not plausible_name(name):
+            return "junk"
+        holders = self._holders(name)
+        if len(holders) >= 2:
+            return "junk"  # pedaço de vários nomes ("Fish", "ouw"): não dá para saber qual
+        if holders or not confirmed or not looks_like_item_name(name):
+            return "pending"
+        return "new"
+
+    def _holders(self, name: str) -> set[str]:
+        """Itens conhecidos dos quais o nome lido é só um pedaço ("Zebra", "Thread", "Fish")."""
+        parts = {p for p in (normalize(name), normalize(fix_ocr(name)), shape_key(name))
+                 if len(p) >= MIN_NAME_LETTERS}
+        holders = set()
+        for key, entry in self._entries().items():
+            whole = {key, shape_key(entry.get("name", key))}
+            if any(part in w and part not in whole for part in parts for w in whole):
+                holders.add(key)
+        return holders
+
+    def _pending_seen(self, name: str) -> int:
+        """Conta mais uma vez o nome aguardando; devolve quantas vezes já foi visto."""
+        entry = self.local.setdefault(normalize(name), {**_new_entry(name), "pending": 0})
+        if "pending" not in entry:
+            return PENDING_PROMOTE  # já é item (lixo antigo com a mesma chave): segue normal
+        entry["pending"] += 1
+        return entry["pending"]
+
+    def _promote(self, key: str) -> None:
+        self.local[key].pop("pending", None)
+
+    def _save_local(self) -> None:
+        try:
+            _save_index(self.local_dir / INDEX_NAME, self.local)
+        except OSError as exc:
+            # disco travado (OneDrive/antivírus) não pode abortar o registro antes do Discord
+            # ser avisado: só loga e segue (a próxima gravação bem-sucedida já corrige o arquivo).
+            logbook.get().warning("Não consegui salvar o catálogo local: %s", exc)
 
     def _canonical(self, key: str) -> dict:
         return self.shared.get(key) or self.local[key]
@@ -205,14 +346,27 @@ class Catalog:
 
     # ------------------------------------------------------------ registro (só no local)
     def record(self, name: str, rarity: str, snapshot: np.ndarray | None,
-               when: datetime | None = None) -> Recorded:
+               when: datetime | None = None, confirmed: bool = True) -> Recorded:
+        """confirmed=False: só uma variante do OCR leu esse nome (se for desconhecido, aguarda)."""
         when_iso = (when or datetime.now()).isoformat(timespec="seconds")
         with self._lock:
             key, how = self._find(name)
+            new_name = LOWER_JUNK_RX.sub("", name)  # nome do item novo, sem a sujeira do ícone
+            if key is None and new_name != name:
+                key, how = self._find(new_name)
             first_time = key is None
             if key is None:
-                key = normalize(name)
-            canonical_name = self._canonical(key)["name"] if not first_time else name
+                verdict = self._verdict(new_name, confirmed)
+                if verdict == "junk":
+                    return Recorded(name, rarity, False, False, accepted=False)
+                key = normalize(new_name)
+                if verdict == "pending":
+                    seen = self._pending_seen(new_name)
+                    if seen < PENDING_PROMOTE:
+                        self._save_local()
+                        return Recorded(name, rarity, False, False, accepted=False, pending=seen)
+                    self._promote(key)
+            canonical_name = self._canonical(key)["name"] if not first_time else new_name
             local = self.local.setdefault(key, _new_entry(canonical_name))
             local.setdefault("count", 0)
             local.setdefault("first_seen", when_iso)
@@ -231,12 +385,7 @@ class Catalog:
                 local["image"] = self._save_image(self.local_dir, local["slug"], snapshot)
             best = self._fixed_rarity(key) or self._votes(key).most_common(1)[0][0]
             local["rarity"] = best
-            try:
-                _save_index(self.local_dir / INDEX_NAME, self.local)
-            except OSError as exc:
-                # disco travado (OneDrive/antivírus) não pode abortar o registro antes do Discord
-                # ser avisado: só loga e segue (a próxima gravação bem-sucedida já corrige o arquivo).
-                logbook.get().warning("Não consegui salvar o catálogo local: %s", exc)
+            self._save_local()
             corrected = how not in (None, "exact") or normalize(name) != key
             return Recorded(canonical_name, best, first_time, corrected)
 
@@ -313,15 +462,25 @@ class Catalog:
                 self._drop_local(key)
                 changes.append((name, None))
                 continue
+            if "pending" in entry:
+                continue  # aguardando confirmar: não é item ainda, não junta em nada
             target, how = self._find(name, exclude=key)
             if target is not None:
                 if self._can_absorb(target, key) and (how in EXACT_HOWS or self._rare_read(key, target)):
                     self._merge_local(key, target)
                     changes.append((name, self._canonical(target)["name"]))
-            elif self._is_partial(key) and self._count(key) <= TIDY_RARE_COUNT:
+            elif ((self._is_partial(key) and self._count(key) <= TIDY_RARE_COUNT)
+                  or (self._count(key) < PENDING_PROMOTE and self._suspicious(name, key))):
                 self._drop_local(key)
                 changes.append((name, None))
         return changes
+
+    def _suspicious(self, name: str, key: str) -> bool:
+        """Item antigo do local que hoje ficaria aguardando: sujo ("4cpilk Thread", "Clou'll Fish")
+        ou pedaço de um nome conhecido ("Thread"). Visto pouco: é lixo de versão antiga."""
+        trimmed = LOWER_JUNK_RX.sub("", name)
+        dirty = not looks_like_item_name(trimmed) and re.search(r"[^A-Za-z ]", trimmed) is not None
+        return dirty or bool(self._holders(trimmed) - {key})
 
     def _count(self, key: str) -> int:
         return self.local.get(key, {}).get("count", 0)
@@ -399,8 +558,8 @@ class Catalog:
         added: list[str] = []
         with self._lock:
             for key, local in self.local.items():
-                if not plausible_name(local.get("name", "")):
-                    continue  # lixo de OCR que entrou antes do filtro: não vai para os amigos
+                if "pending" in local or not plausible_name(local.get("name", "")):
+                    continue  # lixo de OCR / nome aguardando confirmar: não vai para os amigos
                 shared = self.shared.get(key)
                 if shared is None:
                     shared = {f: local.get(f) for f in SHARED_FIELDS}

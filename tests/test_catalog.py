@@ -392,3 +392,115 @@ def test_preco_vem_da_ficha(dirs):
               "aliases": [], "price": -5}]
     (shared / "itens.json").write_text(json.dumps({"items": items}), encoding="utf-8")
     assert Catalog(shared, local).prices() == {"Zebra Fish": 66}  # preço inválido é ignorado
+
+
+# ---------------------------------------------------------------- nomes que não existem (25/09)
+def test_pedacos_do_collect_e_do_x1_sao_lixo():
+    """Leituras reais que viraram "item": pedaço do botão Collect e o "x1" lido como nome."""
+    import catalog
+    for junk in ("xg•.ollec", "xÇollec", "oll", "XC. c.llé.:l", "mxl", "xlv", "xl -SE", "XXI"):
+        assert not catalog.plausible_name(junk), junk
+    for real in ("Collector", "Collected", "Pollen", "Select", "Lynx", "Ore", "OuwFish", "Xiphos"):
+        assert catalog.plausible_name(real), real
+
+
+# (lido pelo OCR nos logs de 24-25/09, nome certo) que ainda viravam item novo
+MISREADS_25 = [
+    ("C r LI stado", "Crustadon"), ("Crustaclon", "Crustadon"), ("Cruscaclon", "Crustadon"),
+    ("CtLtstadon", "Crustadon"), ("rusta cl on", "Crustadon"),
+    ("Cora I", "Coral"), ("ggcoral", "Coral"),
+    ("ra Fish", "Zebra Fish"), ("Dra Fish", "Zebra Fish"), ("bra Fish", "Zebra Fish"),
+    ("finement Ore", "Refinement Ore"), ("rathulon", "Krathulon"), ("thulon", "Krathulon"),
+]
+
+
+@pytest.mark.parametrize("read, name", MISREADS_25)
+def test_leitura_errada_de_hoje_vira_o_item_certo(known, read, name):
+    assert known.resolve(read) == name
+
+
+@pytest.mark.parametrize("read", ["Shotgun Schematic", "Refinement Guard", "Lantern", "Golden Crown", "Horse"])
+def test_item_novo_de_verdade_nao_vira_conhecido(known, read):
+    assert known.resolve(read) == read
+
+
+def test_lixo_nao_entra_no_catalogo_nem_e_mostrado(known, dirs):
+    rec = known.record("xg•.ollec", "common", IMG)
+    assert not rec.accepted
+    assert not (dirs[1] / "itens.json").exists()
+
+
+def test_pedaco_de_varios_nomes_nunca_vira_item(known):
+    """"Fish" (pedaço de Clown/Golden/Zebra Fish) apareceu 6 vezes no log do Ewerton."""
+    assert not any(known.record("Fish", "rare", IMG).accepted for _ in range(8))
+
+
+def test_item_novo_com_nome_limpo_entra_na_hora(known):
+    rec = known.record("Shotgun Schematic", "legendary", IMG)
+    assert rec.accepted and rec.first_time and rec.name == "Shotgun Schematic"
+    rec = known.record("Mythic Refinement Ore", "mythic", IMG)
+    assert rec.accepted and rec.first_time and rec.name == "Mythic Refinement Ore"
+
+
+def test_nome_desconfiado_so_entra_depois_de_visto_3_vezes(known, dirs):
+    """Pedaço de um nome só ("Zebra"), nome sujo ou lido por uma variante só do OCR: fica
+    aguardando e não aparece; se for item novo de verdade, entra na 3ª vez (não some para sempre)."""
+    first = known.record("Zebra", "rare", IMG)
+    assert not first.accepted and not known.knows("Zebra")
+    assert not Catalog(*dirs).record("Zebra", "rare", IMG).accepted  # conta sobrevive a reabrir
+    third = Catalog(*dirs).record("Zebra", "rare", IMG)
+    assert third.accepted and third.first_time and third.name == "Zebra"
+
+
+@pytest.mark.parametrize("read", ["Clovurn Fish", "TY. lon", "ont Ores", "OM ta", "inent C", "C10i.*v111 Fish"])
+def test_nome_desconfiado_nao_aparece_na_primeira_vez(known, read):
+    assert not known.record(read, "rare", IMG, confirmed=read != "Clovurn Fish").accepted
+
+
+def test_nome_limpo_lido_por_uma_variante_so_espera_confirmar(known):
+    assert not known.record("Clovurn Fish", "rare", IMG, confirmed=False).accepted
+    assert known.record("Refinement Guard", "common", IMG, confirmed=True).accepted
+
+
+def test_nome_aguardando_nao_puxa_outras_leituras_nem_vai_para_os_amigos(known, dirs):
+    shared, local = dirs
+    known.record("Clovurn Fish", "rare", IMG, confirmed=False)
+    assert known.resolve("Clovurn Fish") == "Clovurn Fish"  # não é item conhecido
+    assert known.record("Clown Fish", "rare", IMG).name == "Clown Fish"
+    known.publish()
+    assert "Clovurn Fish" not in [i["name"] for i in _index(shared)]
+
+
+def test_arrumar_junta_leituras_erradas_de_hoje_e_tira_o_lixo(known, dirs):
+    """Catálogo local real do usuário (25/09): "ra Fish" com 7 pegos puxava "bra Fish"/"Dra Fish"."""
+    _, local = dirs
+    _old_local(local, [("ra Fish", 7, {"common": 6, "rare": 1}), ("xg•.ollec", 2, {"common": 2}),
+                       ("C r LI stado", 1, {"legendary": 1}), ("Shotgun Schematic", 1, {"legendary": 1}),
+                       ("4cpilk Thread", 1, {"common": 1}), ("Thread", 1, {"common": 1}),
+                       ("zMythic Refinement Ore", 1, {"rare": 1}), ("Clovurn Fish", 1, {"rare": 1})])
+    changes = dict(Catalog(*dirs).tidy())
+    assert changes == {"ra Fish": "Zebra Fish", "xg•.ollec": None, "C r LI stado": "Crustadon",
+                       "4cpilk Thread": None, "Thread": None}
+    # item novo de verdade fica; leitura torta com cara de nome limpo não dá para saber: fica
+    assert {i["name"] for i in _index(local)} == {"Zebra Fish", "Crustadon", "Shotgun Schematic",
+                                                  "zMythic Refinement Ore", "Clovurn Fish"}
+
+
+def test_item_novo_com_sujeira_minuscula_grudada_entra_com_o_nome_limpo(known):
+    # 24/09 21:23: "zMythic Refinement Ore" (item novo de verdade) entrou com o "z" do ícone
+    rec = known.record("zMythic Refinement Ore", "mythic", IMG)
+    assert rec.accepted and rec.first_time and rec.name == "Mythic Refinement Ore"
+    assert known.resolve("zMythic Refinement Ore") == "Mythic Refinement Ore"
+    assert known.resolve("Mythic Refinement Ore") == "Mythic Refinement Ore"
+
+
+def test_leitura_cortada_nao_perde_letras_na_limpeza(known):
+    assert known.resolve("uwFvvesh") == "OuwFwesh"  # OuwFwesh sem o "O"
+    assert known.resolve("hOuwFish") == "OuwFish"
+    assert known.resolve("vZebra Fish") == "Zebra Fish"
+
+
+@pytest.mark.parametrize("read", ["Clovu'll Fish", "Yzebra FIF", "ROre", "LOSt Mask"])
+def test_nome_com_cara_de_leitura_torta_espera_confirmar(dirs, read):
+    """Apóstrofo no meio da palavra e MAIÚSCULAS seguidas não são como os nomes do jogo."""
+    assert not Catalog(*dirs).record(read, "rare", IMG).accepted
