@@ -300,7 +300,8 @@ class App(ctk.CTk):
     def _update_overlay(self) -> None:
         try:
             elapsed, counts, baits = self.session.overlay_snapshot()
-            self.overlay.refresh(overlay.build_lines(elapsed, counts, baits, prices=self._prices))
+            self.overlay.refresh(overlay.build_lines(elapsed, counts, baits, prices=self._prices,
+                                                     rarities=self.session.item_rarities()))
             self.overlay.follow()
         except Exception:  # o overlay é só para ver: nunca pode atrapalhar a macro
             if not self._overlay_failed:

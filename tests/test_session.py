@@ -210,3 +210,12 @@ def test_falha_ao_guardar_nao_derruba_o_registro(tmp_path, monkeypatch):
     monkeypatch.setattr(mod.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("travado")))
     s.record("Ore", 1, "mythic")
     assert s.catches == 1
+
+
+def test_lembra_a_raridade_de_cada_item_mesmo_depois_de_reabrir(tmp_path):
+    state = tmp_path / "sessao-atual.json"
+    s = Session(log_dir=tmp_path, state_path=state)
+    s.record("Ore", 1, "mythic")
+    s.record("Coral", 1, "common")
+    assert s.item_rarities() == {"Ore": "mythic", "Coral": "common"}
+    assert Session.load(log_dir=tmp_path, state_path=state).item_rarities() == {"Ore": "mythic", "Coral": "common"}

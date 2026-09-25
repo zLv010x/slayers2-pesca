@@ -38,6 +38,7 @@ class Session:
     catches: int = 0                                       # nº de drops (cada coleta = 1)
     misses: int = 0                                        # minigames perdidos / sem aviso
     baits_used: Counter = field(default_factory=Counter)  # isca -> quantas gastou nesta sessão
+    item_rarity: dict = field(default_factory=dict)       # item -> raridade (cor/ordem no overlay)
     last: list[tuple[str, str, int, str]] = field(default_factory=list)  # (hora, nome, qtd, raridade)
     _csv_path: Path | None = None
     _active_sec: float = 0.0            # tempo pescando nas rodadas anteriores
@@ -82,6 +83,7 @@ class Session:
             self.catches += 1
             self.counts[name] += quantity
             self.rarities[rarity] += 1
+            self.item_rarity[name] = rarity
             self.last.insert(0, (now.strftime("%H:%M:%S"), name, quantity, rarity))
             del self.last[MAX_RECENT:]
         self._append_csv(now, name, quantity, rarity)
@@ -131,6 +133,7 @@ class Session:
         self.baits_used = Counter({str(k): int(v) for k, v in data.get("baits_used", {}).items()})
         self.catches, self.misses = int(data["catches"]), int(data["misses"])
         self.last = [(str(h), str(n), int(q), str(r)) for h, n, q, r in data["last"]][:MAX_RECENT]
+        self.item_rarity = {n: r for _, n, _, r in reversed(self.last)}  # o mais novo vale
         self._active_sec = max(0.0, float(data.get("active_sec", 0.0)))
         csv_path = data.get("csv")
         self._csv_path = Path(csv_path) if csv_path and Path(csv_path).exists() else None
@@ -161,6 +164,10 @@ class Session:
                 self.state_path.unlink(missing_ok=True)
             except OSError as exc:
                 logbook.get().warning("Não consegui apagar a sessão guardada: %s", exc)
+
+    def item_rarities(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self.item_rarity)
 
     def overlay_snapshot(self) -> tuple[str, Counter, Counter]:
         """Tempo, itens e iscas gastas (cópias: o overlay lê na thread da interface)."""

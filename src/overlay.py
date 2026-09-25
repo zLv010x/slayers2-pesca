@@ -24,6 +24,9 @@ PARTY_MARGIN = 0.005      # afasta um pouco da borda esquerda
 MAX_ROWS = 8              # linhas por seção; o resto vira "+N outros"
 ALPHA = 0.88
 BG, FG, HEAD, MUTED, QTY, MONEY = "#111827", "#e5e7eb", "#93c5fd", "#9ca3af", "#fbbf24", "#34d399"
+RARITY_ORDER = ("mythic", "legendary", "epic", "rare", "common")  # de cima para baixo
+RARITY_COLORS = {"mythic": "#e11d48", "legendary": "#f5b400", "epic": "#a855f7",
+                 "rare": "#3b82f6", "common": "#9aa0a6"}
 CURRENCY = "Yen"          # moeda do jogo (Ginzo é o vendedor de peixes; o preço aparece no inventário)
 FONT = ("Segoe UI", 10)
 FONT_BOLD = ("Segoe UI Semibold", 10)
@@ -41,6 +44,10 @@ class Line(NamedTuple):
     style: str               # title | head | row | more | total | empty
     qty: int | None = None
     value: int | None = None  # quanto vale vender (quantidade x preço da ficha)
+    color: str | None = None  # cor da raridade do item (None = cor normal da linha)
+
+
+STYLE_COLORS = {"title": FG, "head": HEAD, "row": FG, "more": MUTED, "empty": MUTED, "total": MONEY}
 
 
 def _shape(line: Line) -> tuple:
@@ -65,13 +72,22 @@ def kind_of(name: str) -> str:
     return "peixe" if "fish" in key or key in FISH_NAMES else "item"
 
 
-def _sorted_rows(counts: Counter) -> list[tuple[str, int]]:
+def _rank(name: str, rarities: dict[str, str] | None) -> int:
+    """Posição da raridade (mythic = 0); sem raridade conhecida vai por último."""
+    if not rarities:
+        return 0
+    rarity = rarities.get(name)
+    return RARITY_ORDER.index(rarity) if rarity in RARITY_ORDER else len(RARITY_ORDER)
+
+
+def _sorted_rows(counts: Counter, rarities: dict[str, str] | None = None) -> list[tuple[str, int]]:
     rows = [(name, qty) for name, qty in counts.items() if name.strip() and qty > 0]
-    return sorted(rows, key=lambda r: (-r[1], r[0].lower()))
+    return sorted(rows, key=lambda r: (_rank(r[0], rarities), -r[1], r[0].lower()))
 
 
-def split_counts(counts: Counter) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
-    rows = _sorted_rows(counts)
+def split_counts(counts: Counter, rarities: dict[str, str] | None = None
+                 ) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+    rows = _sorted_rows(counts, rarities)
     fish = [r for r in rows if kind_of(r[0]) == "peixe"]
     items = [r for r in rows if kind_of(r[0]) == "item"]
     return fish, items
@@ -82,14 +98,16 @@ def trim(rows: list, limit: int) -> tuple[list, int]:
 
 
 def _section(title: str, rows: list[tuple[str, int]], max_rows: int,
-             prices: dict[str, int] | None = None, total_label: str | None = None) -> list[Line]:
+             prices: dict[str, int] | None = None, total_label: str | None = None,
+             rarities: dict[str, str] | None = None) -> list[Line]:
     if not rows:
         return []
     prices = prices or {}
     value = {name: qty * prices[name] for name, qty in rows if name in prices}
     shown, rest = trim(rows, max_rows)
     out = [Line(f"{title} ({sum(q for _, q in rows)})", "head")]
-    out += [Line(name, "row", qty, value.get(name)) for name, qty in shown]
+    rarities = rarities or {}
+    out += [Line(name, "row", qty, value.get(name), RARITY_COLORS.get(rarities.get(name))) for name, qty in shown]
     if rest:
         out.append(Line(f"+{rest} outros", "more"))
     if total_label and value:  # soma de todos, até os que ficaram em "+N outros"
@@ -98,13 +116,13 @@ def _section(title: str, rows: list[tuple[str, int]], max_rows: int,
 
 
 def build_lines(elapsed: str, counts: Counter, baits_used: Counter, max_rows: int = MAX_ROWS,
-                prices: dict[str, int] | None = None) -> list[Line]:
-    fish, items = split_counts(counts)
+                prices: dict[str, int] | None = None, rarities: dict[str, str] | None = None) -> list[Line]:
+    fish, items = split_counts(counts, rarities)
     lines = [Line(f"⏱ {elapsed}", "title")]
     if not fish and not items:
         lines.append(Line("Nada pego ainda", "empty"))
-    lines += _section("Peixes", fish, max_rows, prices, f"Total ({CURRENCY})")
-    lines += _section("Itens", items, max_rows, prices)
+    lines += _section("Peixes", fish, max_rows, prices, f"Total ({CURRENCY})", rarities)
+    lines += _section("Itens", items, max_rows, prices, rarities=rarities)
     lines += _section("Iscas gastas", _sorted_rows(baits_used), max_rows)
     return lines
 
@@ -202,7 +220,7 @@ class Overlay(tk.Toplevel):
 
     def _update_line(self, row: int, line: Line) -> None:
         label, qty, value = self._cells[row]
-        label.configure(text=line.text)
+        label.configure(text=line.text, fg=line.color or STYLE_COLORS.get(line.style, FG))
         if qty is not None:
             qty.configure(text=str(line.qty))
         if value is not None:
@@ -216,7 +234,7 @@ class Overlay(tk.Toplevel):
         }
         font, color, top = styles.get(line.style, (FONT, FG, 0))
         indent = 10 if line.style in ("row", "more", "total") else 0
-        label = tk.Label(self._body, text=line.text, font=font, fg=color, bg=BG, anchor="w")
+        label = tk.Label(self._body, text=line.text, font=font, fg=line.color or color, bg=BG, anchor="w")
         span = 1 if line.qty is not None or line.value is not None else 3
         label.grid(row=row, column=0, columnspan=span, sticky="w", padx=(indent, 0), pady=(top, 0))
         self._bind_drag(label)

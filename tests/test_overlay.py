@@ -137,3 +137,27 @@ def test_coral_conta_como_peixe_e_entra_no_total():
     lines = overlay.build_lines("1m 00s", Counter({"Coral": 3, "Zebra Fish": 1, "Ore": 2}), Counter(),
                                 prices={"Coral": 33, "Zebra Fish": 66})
     assert next(ln for ln in lines if ln.style == "total").value == 3 * 33 + 66
+
+
+# ---------------------------------------------------------------- cor e ordem por raridade (25/09)
+RARITIES = {"Golden Fish": "rare", "Krathulon": "legendary", "Coral": "common", "Ore": "mythic",
+            "Metal Scraps": "common", "Lost Outfit": "mythic"}
+
+
+def test_itens_em_ordem_de_raridade_mythic_em_cima():
+    counts = Counter({"Golden Fish": 17, "Krathulon": 6, "Coral": 20, "Ore": 2, "Metal Scraps": 9, "Lost Outfit": 1})
+    lines = overlay.build_lines("1m 00s", counts, Counter(), rarities=RARITIES)
+    rows = [ln.text for ln in lines if ln.style == "row"]
+    assert rows == ["Krathulon", "Golden Fish", "Coral", "Ore", "Lost Outfit", "Metal Scraps"]  # peixes, depois itens
+
+
+def test_cada_item_tem_a_cor_da_raridade():
+    lines = overlay.build_lines("1m 00s", Counter({"Ore": 2, "Coral": 1}), Counter(), rarities=RARITIES)
+    color = {ln.text: ln.color for ln in lines if ln.style == "row"}
+    assert color["Ore"] == overlay.RARITY_COLORS["mythic"] and color["Coral"] == overlay.RARITY_COLORS["common"]
+
+
+def test_item_sem_raridade_conhecida_vai_por_ultimo_sem_cor():
+    lines = overlay.build_lines("1m 00s", Counter({"Coisa Nova": 50, "Coral": 1}), Counter(), rarities=RARITIES)
+    rows = [ln for ln in lines if ln.style == "row"]
+    assert [r.text for r in rows] == ["Coral", "Coisa Nova"] and rows[1].color is None
