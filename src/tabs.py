@@ -233,6 +233,14 @@ class SetupTab:
             self.auto_camera.select()
         hint(box, _("Antes de pausar, tenta arrastar a câmera de volta (botão direito) sozinha; "
                   "só pausa esperando você se não conseguir."))
+        r = row(box)
+        ctk.CTkButton(r, text=_("Testar sensibilidade da câmera"), width=180,
+                      command=app.test_camera_sensitivity).pack(side="left")
+        self.camera_cal_lbl = ctk.CTkLabel(r, text=self._camera_cal_text(cfg), anchor="w")
+        self.camera_cal_lbl.pack(side="left", padx=10)
+        hint(box, _("Mede sozinho quanto arrastar o mouse para cada px que a bússola desviar: a "
+                  "sensibilidade do mouse e da câmera é diferente em cada PC. Roda sozinho depois de "
+                  "marcar o ponto; use o botão para testar de novo."))
 
         box = section(scroll, _("Barra do minigame"))
         r = row(box)
@@ -322,8 +330,21 @@ class SetupTab:
         self.cast_lbl.configure(
             text=(_("x {x:.3f}  y {y:.3f}{lock}", x=pt['x'], y=pt['y'], lock=lock) if pt else _("não marcado")),
             text_color=(OK if pt else BAD))
+        self.camera_cal_lbl.configure(text=self._camera_cal_text(self.app.cfg))
         for key, btn in self.hotkey_btns.items():
             btn.configure(text=self.app.cfg["hotkeys"][key])
+
+    @staticmethod
+    def _camera_cal_text(cfg) -> str:
+        gain = cfg.get("camera_gain")
+        if gain:
+            return _("Sensibilidade: {gain:.1f} px/px ✓", gain=gain)
+        return _("Sensibilidade: ainda não testada")
+
+    def set_camera_cal_status(self, text: str) -> None:
+        """Chamado pelo App (e, dentro da pesca, indiretamente pelo Fisher) para mostrar o
+        andamento/resultado do teste de sensibilidade da câmera."""
+        self.camera_cal_lbl.configure(text=text)
 
     def _save_lock(self) -> None:
         self.app.cfg["compass_lock"] = bool(self.lock.get())

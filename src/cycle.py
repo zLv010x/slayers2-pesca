@@ -19,6 +19,7 @@ from typing import Callable
 import numpy as np
 
 import bait_menu
+import camera_cal
 import capture_mode
 import hotbar
 import i18n
@@ -86,6 +87,11 @@ AUTO_CAMERA_RECHECKS = 2
 AUTO_CAMERA_RECHECK_SEC = 0.3
 # Bússola mexendo menos que isso depois de um arrasto não serve para aprender o ganho.
 AUTO_CAMERA_MIN_MOVED_PX = 3
+# Depois de medir a sensibilidade (camera_cal.measure_camera_gain) ou carregar um ganho já
+# medido do config, o aprendizado fica preso a uma faixa em volta desse valor (em vez da
+# faixa AUTO_CAMERA_MIN/MAX_GAIN inteira): sem isso, uma leitura ruim durante a pesca podia
+# disparar para um ganho tão descontrolado quanto o chute inicial errado que ele substituiu.
+AUTO_CAMERA_LEARN_RANGE_FACTOR = 5.0
 
 log = logbook.get()
 
@@ -107,6 +113,8 @@ class Callbacks:
     bait: Callable[[str, bool], None] = field(default=lambda text, warn: None)
     # spawn setado (True) ou não deu (False): o app marca a caixa "Já setei o spawn"
     spawn_set: Callable[[bool], None] = field(default=lambda ok: None)
+    # ganho da câmera medido sozinho (dentro da pesca): o app salva no config
+    camera_gain: Callable[[float], None] = field(default=lambda gain: None)
 
 
 @dataclass(frozen=True)
@@ -121,7 +129,7 @@ class Fisher:
     def __init__(self, cfg: dict, cb: Callbacks, session: Session,
                  notifier: DiscordNotifier, compass: CompassLock,
                  catalog: Catalog | None = None, baits: BaitState | None = None,
-                 bait_path: Path | None = None) -> None:
+                 bait_path: Path | None = None, auto_calibrate_camera: bool = False) -> None:
         self.catalog = catalog
         self.baits = baits
         self.bait_path = bait_path
@@ -141,7 +149,18 @@ class Fisher:
         self.detector = Detector()
         self.tracker = TrackController()
         self.mouse = screen.MouseButton()
-        self._camera_gain = AUTO_CAMERA_DEFAULT_GAIN
+        # sensibilidade automática da câmera (px de arrasto por px de bússola): parte do
+        # ganho já medido no config, se houver, senão do chute de sempre (3.0)
+        self._camera_calib_enabled = auto_calibrate_camera
+        self._camera_calib_tried = False
+        measured_gain = cfg.get("camera_gain")
+        if measured_gain:
+            self._set_camera_gain(float(measured_gain))
+        else:
+            self._camera_gain = AUTO_CAMERA_DEFAULT_GAIN
+            self._camera_gain_seed = AUTO_CAMERA_DEFAULT_GAIN
+            self._camera_gain_lo, self._camera_gain_hi = AUTO_CAMERA_MIN_GAIN, AUTO_CAMERA_MAX_GAIN
+            self._camera_gain_calibrated = False
         self.grabber: screen.Grabber | None = None
         self.hwnd: int | None = None
         self._stop = threading.Event()
@@ -257,10 +276,16 @@ class Fisher:
         drift = self.compass.drift_px(img)
         if drift is not None and abs(drift) <= tol:
             return
-        if self.cfg.get("auto_camera", True) and self._auto_fix_camera(tol, drift):
-            log.info("Câmera ajustada sozinha (ganho aprendido %.3f px/px).", self._camera_gain)
-            screen.wait_mouse_free(sleep=self.sleep)
-            return
+        if self.cfg.get("auto_camera", True):
+            if self._ensure_camera_calibrated(tol):
+                # a calibração mexeu na câmera (e tentou devolver): confere de novo em vez
+                # de confiar numa leitura de antes de girar tudo isso.
+                _, img = self.frame()
+                drift = self.compass.drift_px(img)
+            if self._auto_fix_camera(tol, drift):
+                log.info("Câmera ajustada sozinha (ganho aprendido %.3f px/px).", self._camera_gain)
+                screen.wait_mouse_free(sleep=self.sleep)
+                return
         self._pause_for_camera(tol, drift, img)
 
     def _pause_for_camera(self, tol: int, drift: int | None, img: np.ndarray | None) -> None:
@@ -303,14 +328,21 @@ class Fisher:
 
     def _learn_gain(self, drift_before: int, dx: int, drift_after: int) -> None:
         """Ajusta o ganho (px de arrasto por px de bússola) pela resposta medida, sinal incluído:
-        se o sentido do arrasto estiver invertido, o ganho aprendido também inverte sozinho."""
+        se o sentido do arrasto estiver invertido, o ganho aprendido também inverte sozinho
+        (só quando ainda não foi calibrado: ver `_camera_gain_calibrated`)."""
         moved = drift_before - drift_after  # quanto a bússola realmente voltou com esse arrasto
         if dx == 0 or abs(moved) < AUTO_CAMERA_MIN_MOVED_PX:
             return
         gain = dx / moved
-        gain = max(-AUTO_CAMERA_MAX_GAIN, min(AUTO_CAMERA_MAX_GAIN, gain))
-        if abs(gain) < AUTO_CAMERA_MIN_GAIN:
-            gain = AUTO_CAMERA_MIN_GAIN if gain >= 0 else -AUTO_CAMERA_MIN_GAIN
+        if self._camera_gain_calibrated:
+            # já sabemos o sentido certo (veio da calibração ou do config): só deixa a
+            # magnitude variar dentro da faixa em volta do valor medido, sem inverter o sinal.
+            magnitude = max(self._camera_gain_lo, min(self._camera_gain_hi, abs(gain)))
+            gain = magnitude if self._camera_gain_seed >= 0 else -magnitude
+        else:
+            gain = max(-self._camera_gain_hi, min(self._camera_gain_hi, gain))
+            if abs(gain) < self._camera_gain_lo:
+                gain = self._camera_gain_lo if gain >= 0 else -self._camera_gain_lo
         self._camera_gain = gain
 
     def _sweep_for_compass(self) -> int | None:
@@ -333,8 +365,47 @@ class Fisher:
         """
         ok = self._try_fix_camera(tol, drift)
         if not ok:
-            self._camera_gain = AUTO_CAMERA_DEFAULT_GAIN
+            self._camera_gain = self._camera_gain_seed
         return ok
+
+    def _set_camera_gain(self, gain: float) -> None:
+        """Fixa `gain` como o ganho atual e a semente para onde `_auto_fix_camera` volta
+        se o ajuste fino falhar, e prende o aprendizado numa faixa em volta dele."""
+        self._camera_gain = gain
+        self._camera_gain_seed = gain
+        lo = max(AUTO_CAMERA_MIN_GAIN, abs(gain) / AUTO_CAMERA_LEARN_RANGE_FACTOR)
+        hi = min(AUTO_CAMERA_MAX_GAIN, abs(gain) * AUTO_CAMERA_LEARN_RANGE_FACTOR)
+        self._camera_gain_lo, self._camera_gain_hi = lo, hi
+        self._camera_gain_calibrated = True
+
+    def _ensure_camera_calibrated(self, tol: int) -> bool:
+        """A câmera automática vai precisar corrigir e o ganho nunca foi medido: mede a
+        sensibilidade agora (cada PC tem uma sensibilidade de mouse e de câmera diferente)
+        antes de tentar corrigir às cegas com o chute inicial. Só roda quando o chamador
+        ligou `auto_calibrate_camera` (a pesca de verdade liga; testes não, por padrão) e
+        só uma vez por rodada, mesmo se a medição falhar. Devolve True se tentou (a
+        câmera pode ter mexido: quem chamou precisa conferir a bússola de novo)."""
+        if not self._camera_calib_enabled or self._camera_gain_calibrated or self._camera_calib_tried:
+            return False
+        self._camera_calib_tried = True
+        self._park_cursor_for_camera()
+        self.cb.status(i18n._("Nunca medi a sensibilidade da câmera: testando agora..."))
+        result = camera_cal.measure_camera_gain(self._camera_cal_actions(), tol_px=tol)
+        if result.ok and result.gain:
+            self._set_camera_gain(result.gain)
+            self.cb.camera_gain(result.gain)
+            log.info("Sensibilidade da câmera medida sozinha: %.3f px/px.", result.gain)
+        else:
+            log.warning("Não consegui medir a sensibilidade da câmera sozinho: %s", result.reason)
+        return True
+
+    def _camera_cal_actions(self) -> camera_cal.CalActions:
+        def grab_frame() -> np.ndarray:
+            _, img = self.frame()
+            return img
+        return camera_cal.CalActions(grab_frame=grab_frame, drift=self.compass.drift_px,
+                                     right_drag=screen.right_drag, sleep=self.sleep,
+                                     status=self.cb.status)
 
     def _recheck_compass(self) -> int | None:
         for _ in range(AUTO_CAMERA_RECHECKS):

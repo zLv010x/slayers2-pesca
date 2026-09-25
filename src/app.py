@@ -6,7 +6,9 @@ import os
 import sys
 import queue
 import threading
+import time
 import tkinter as tk
+from datetime import datetime
 from tkinter import messagebox
 from typing import Callable
 
@@ -15,6 +17,7 @@ import cv2
 import keyboard
 from PIL import Image
 
+import camera_cal
 import capture_mode
 import config
 import watchdog
@@ -102,6 +105,7 @@ class App(ctk.CTk):
         self._listening: str | None = None
         self._hotkey_handles: list = []
         self._picker_open = False
+        self._camera_cal_running = False
         self._minimized_by_run = False
         self._worker: threading.Thread | None = None
         self._restart_policy = RestartPolicy()
@@ -409,9 +413,10 @@ class App(ctk.CTk):
         cb = Callbacks(status=lambda m: self.post(lambda: self.set_status(m)),
                        loot=lambda items, snap: self.post(lambda: self._on_loot(items, snap)),
                        bait=lambda text, warn: self.post(lambda: self._show_bait(text, warn)),
-                       spawn_set=lambda ok: self.post(lambda: self._on_spawn_set(ok)))
+                       spawn_set=lambda ok: self.post(lambda: self._on_spawn_set(ok)),
+                       camera_gain=lambda gain: self.post(lambda: self._on_camera_gain_learned(gain)))
         fisher = Fisher(copy.deepcopy(self.cfg), cb, self.session, self.notifier, self.compass, self.catalog,
-                        baits=self.baits, bait_path=BAIT_FILE)
+                        baits=self.baits, bait_path=BAIT_FILE, auto_calibrate_camera=True)
         fisher.bait_check_requested = self._bait_check_pending
         self._bait_check_pending = False
         fisher.spawn_requested = self._spawn_pending
@@ -603,6 +608,9 @@ class App(ctk.CTk):
             self.save_soon()
             self.setup_tab.refresh()
             self.set_status(_("Ponto de lançamento e câmera salvos ✓"))
+            # Gatilho (b): logo depois de marcar o ponto, com o Roblox em foco, mede a
+            # sensibilidade sozinha (cada PC tem uma sensibilidade de mouse/câmera diferente).
+            self._start_camera_cal()
 
         PointPicker(self, rect, _("Clique onde a vara deve lançar"), done)
 
@@ -627,6 +635,84 @@ class App(ctk.CTk):
             self.set_status(_("Área da barra salva ✓"))
 
         self.after(FOCUS_DELAY_MS, lambda: AreaPicker(self, rect, self.cfg["scan_area"], done))
+
+    # ------------------------------------------------------------ sensibilidade da câmera
+    def test_camera_sensitivity(self) -> None:
+        """Botão "Testar sensibilidade da câmera" (aba Configurar): gatilho (a)."""
+        if self._running or self._picker_open or self._camera_cal_running:
+            self.set_status(_("Pare a pesca antes de testar a câmera."))
+            return
+        if not self.cfg.get("cast_point") or not self.compass.ready:
+            self.setup_tab.set_camera_cal_status(_("Marque o ponto de lançamento antes de testar a câmera."))
+            return
+        rect = self._game_rect()
+        if rect is None:
+            return
+        self._start_camera_cal()
+
+    def _start_camera_cal(self) -> None:
+        """Roda o teste de sensibilidade numa thread separada (mexe no mouse e espera:
+        não pode travar a interface). Não faz nada se já estiver rodando ou sem ponto."""
+        if self._camera_cal_running or not self.cfg.get("cast_point") or not self.compass.ready:
+            return
+        hwnd = window.find_roblox()
+        if hwnd is None:
+            return
+        # o teste mexe no botão direito de verdade: precisa do Roblox em foco (e não da
+        # própria macro, que `_restore_window` acabou de trazer para cima depois do picker).
+        window.focus(hwnd)
+        self._camera_cal_running = True
+        self.setup_tab.set_camera_cal_status(_("Testando a sensibilidade da câmera..."))
+        threading.Thread(target=self._run_camera_cal, args=(hwnd,), daemon=True).start()
+
+    def _camera_cal_actions(self, hwnd: int, grabber: screen.Grabber) -> camera_cal.CalActions:
+        def grab_frame():
+            r = window.client_rect(hwnd)
+            if r is None:
+                raise RuntimeError("janela do Roblox sumiu durante o teste")
+            return grabber.grab(r)
+        return camera_cal.CalActions(
+            grab_frame=grab_frame, drift=self.compass.drift_px, right_drag=screen.right_drag,
+            sleep=time.sleep, status=lambda msg: self.post(lambda: self.setup_tab.set_camera_cal_status(msg)))
+
+    def _run_camera_cal(self, hwnd: int) -> None:
+        grabber = screen.Grabber()
+        try:
+            screen.wait_mouse_free(sleep=time.sleep)
+            rect = window.client_rect(hwnd)
+            pt = self.cfg.get("cast_point")
+            if rect is not None and pt:
+                screen.move_to(*Fisher.to_screen(rect, pt["x"], pt["y"]))
+            result = camera_cal.measure_camera_gain(self._camera_cal_actions(hwnd, grabber))
+        except Exception as exc:  # o teste mexe no mouse: nunca pode travar a thread em silêncio
+            logbook.get().exception("Erro inesperado no teste de sensibilidade da câmera")
+            result = camera_cal.CameraCalResult(False, None, i18n._(
+                "erro inesperado ({tipo}: {exc})", tipo=type(exc).__name__, exc=exc))
+        finally:
+            grabber.close()
+            screen.release_right_button()  # nunca deixa o botão direito preso, mesmo se algo falhar
+        self.post(lambda: self._on_camera_cal_done(result))
+
+    def _on_camera_cal_done(self, result: camera_cal.CameraCalResult) -> None:
+        self._camera_cal_running = False
+        if result.ok and result.gain:
+            self._save_camera_gain(result.gain)
+            self.setup_tab.set_camera_cal_status(_("Sensibilidade: {gain:.1f} px/px ✓", gain=result.gain))
+        else:
+            self.setup_tab.set_camera_cal_status(
+                _("Sensibilidade: falhou ({reason})", reason=result.reason or "?"))
+
+    def _on_camera_gain_learned(self, gain: float) -> None:
+        """Gatilho (c): a câmera automática mediu sozinha porque precisou corrigir e
+        nunca tinha testado ainda (dentro da pesca, `cycle.Fisher._ensure_camera_calibrated`)."""
+        self._save_camera_gain(gain)
+        self.setup_tab.set_camera_cal_status(
+            _("Sensibilidade: {gain:.1f} px/px ✓ (medida durante a pesca)", gain=gain))
+
+    def _save_camera_gain(self, gain: float) -> None:
+        self.cfg["camera_gain"] = gain
+        self.cfg["camera_gain_measured_at"] = datetime.now().isoformat(timespec="seconds")
+        self.save_soon()
 
     def reset_advanced(self) -> None:
         for group in ("timings", "limits", "tracking"):

@@ -11,12 +11,13 @@ from hotbar import RodCheck
 class FakeFisher(cycle.Fisher):
     """Fisher sem tela de verdade: a hotbar responde a partir de uma lista."""
 
-    def __init__(self, equipped_seq):
+    def __init__(self, equipped_seq, auto_calibrate_camera=False):
         cb = cycle.Callbacks(status=lambda m: None, loot=lambda items, snap: None)
         cfg = copy.deepcopy(config.DEFAULTS)
         cfg["timings"]["rod_equip_wait_sec"] = 0
         cfg["discord"]["notify_problems"] = False
-        super().__init__(cfg, cb, session=None, notifier=None, compass=None)
+        super().__init__(cfg, cb, session=None, notifier=None, compass=None,
+                         auto_calibrate_camera=auto_calibrate_camera)
         self._seq = list(equipped_seq)
         self._stop = threading.Event()
 
@@ -798,9 +799,9 @@ def auto_camera_env(monkeypatch):
     na bússola falsa, que responde de acordo com o ganho "real" escondido no teste."""
     monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
 
-    def make(compass, frames=200):
+    def make(compass, frames=200, auto_calibrate_camera=False):
         monkeypatch.setattr(cycle.screen, "right_drag", lambda dx: compass.apply_drag(dx))
-        f = FakeFisher([None] * frames)
+        f = FakeFisher([None] * frames, auto_calibrate_camera=auto_calibrate_camera)
         f.compass = compass
         return f
     return make
@@ -960,6 +961,101 @@ def test_bussola_sumida_um_quadro_nao_varre(auto_camera_env):
     f = auto_camera_env(compass)
     assert f._auto_fix_camera(tol=6, drift=None) is True
     assert compass.drags == []
+
+
+# ------------------------------------------------ ganho medido (config + teste de sensibilidade)
+
+def test_fisher_usa_o_ganho_do_config():
+    """Pedido do usuário: depois de medido, o Fisher começa a câmera automática com o
+    ganho medido em vez do chute de 3.0."""
+    cfg = copy.deepcopy(config.DEFAULTS)
+    cfg["camera_gain"] = 16.3
+    cb = cycle.Callbacks(status=lambda m: None, loot=lambda items, snap: None)
+    f = cycle.Fisher(cfg, cb, session=None, notifier=None, compass=None)
+    assert f._camera_gain == pytest.approx(16.3)
+    assert f._camera_gain_calibrated is True
+
+
+def test_fisher_sem_config_usa_o_chute_padrao():
+    cfg = copy.deepcopy(config.DEFAULTS)
+    assert cfg["camera_gain"] is None  # nunca testado
+    cb = cycle.Callbacks(status=lambda m: None, loot=lambda items, snap: None)
+    f = cycle.Fisher(cfg, cb, session=None, notifier=None, compass=None)
+    assert f._camera_gain == cycle.AUTO_CAMERA_DEFAULT_GAIN
+    assert f._camera_gain_calibrated is False
+
+
+def test_aprendizado_fica_preso_perto_do_ganho_medido():
+    """Depois de calibrado, o aprendizado não pode disparar descontrolado (como o 16 sem
+    calibração de um PC): fica numa faixa em volta do valor medido."""
+    f = FakeFisher([])
+    f._set_camera_gain(16.0)
+    # uma leitura ruim (ex.: pico de ruído) não pode fazer o ganho desabar para perto de zero
+    f._learn_gain(drift_before=100, dx=100, drift_after=-900)  # moved=1000 -> gain bruto 0.1
+    assert f._camera_gain == pytest.approx(16.0 / cycle.AUTO_CAMERA_LEARN_RANGE_FACTOR)
+    # uma leitura dentro da faixa é aceita normalmente (o aprendizado continua valendo)
+    f._learn_gain(drift_before=100, dx=1700, drift_after=0)  # moved=100 -> gain 17
+    assert f._camera_gain == pytest.approx(17.0)
+
+
+def test_ajuste_fino_falho_volta_para_o_ganho_medido_nao_para_o_chute(auto_camera_env):
+    """`_auto_fix_camera` volta para a "semente" quando o ajuste fino falha: calibrado,
+    essa semente é o ganho medido, não o chute de 3.0 (que nem faz mais sentido usar)."""
+    compass = FakeCompassAuto(drift0=50, real_gain=0.4, none_calls=999)  # nunca aparece: desiste
+    f = auto_camera_env(compass)
+    f._set_camera_gain(16.0)
+    assert f._auto_fix_camera(tol=6, drift=None) is False
+    assert f._camera_gain == pytest.approx(16.0)
+
+
+def test_check_camera_nao_calibra_sozinho_por_padrao(auto_camera_env, monkeypatch):
+    """auto_calibrate_camera=False (padrão): nunca dispara o teste de sensibilidade sozinho,
+    mesmo precisando corrigir e nunca tendo medido — comportamento de antes, intacto."""
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: None)
+    monkeypatch.setattr(cycle.camera_cal, "measure_camera_gain",
+                        lambda *a, **kw: pytest.fail("não devia calibrar sozinho aqui"))
+    compass = FakeCompassAuto(drift0=50, real_gain=0.5)
+    f = auto_camera_env(compass)  # auto_calibrate_camera=False por padrão
+    f.check_camera()
+    assert f._camera_gain_calibrated is False
+
+
+def test_check_camera_calibra_sozinho_quando_habilitado_e_nunca_testou(auto_camera_env, monkeypatch):
+    """Gatilho (c): a câmera automática precisa corrigir, o ganho nunca foi medido, e o
+    chamador ligou `auto_calibrate_camera` (como a pesca de verdade liga): mede sozinho
+    antes de tentar corrigir às cegas."""
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: None)
+    compass = FakeCompassAuto(drift0=100, real_gain=1 / 16)  # como um PC real: ~16 px/px
+    f = auto_camera_env(compass, auto_calibrate_camera=True)
+    gains_reported = []
+    f.cb.camera_gain = gains_reported.append
+    f.check_camera()
+    assert f._camera_gain_calibrated is True
+    assert gains_reported and gains_reported[0] == pytest.approx(16.0, rel=0.1)
+    # a semente vira o ganho medido (o ajuste fino que roda em seguida ainda pode refinar
+    # `_camera_gain` um pouco, mas preso à faixa em volta dessa semente — não descontrolado)
+    assert f._camera_gain_seed == pytest.approx(gains_reported[0])
+    assert f._camera_gain_lo <= abs(f._camera_gain) <= f._camera_gain_hi
+    # a bússola só enxerga px inteiros (arredondados): a leitura pode achar que já chegou
+    # dentro da tolerância com a posição de verdade até 1px mais longe (nada novo disto
+    # aqui: o mesmo já vale para `_try_fix_camera` sem calibração nenhuma).
+    assert abs(compass.pos) <= f.cfg.get("compass_tolerance_px", 6) + 1
+
+
+def test_calibracao_so_tenta_uma_vez_por_rodada_mesmo_se_falhar(auto_camera_env, monkeypatch):
+    monkeypatch.setattr(cycle.logbook, "save_evidence", lambda img, reason: None)
+    monkeypatch.setattr(cycle.screen, "wait_mouse_free", lambda **kw: None)
+    calls = []
+    monkeypatch.setattr(cycle.camera_cal, "measure_camera_gain", lambda *a, **kw: (
+        calls.append(1), cycle.camera_cal.CameraCalResult(False, None, "falhou"))[1])
+    compass = FakeCompassAuto(drift0=50, real_gain=0.5)
+    f = auto_camera_env(compass, frames=400, auto_calibrate_camera=True)
+    f.check_camera()
+    compass.pos = 50.0  # câmera desviou de novo, independente do que rolou na 1ª conferência
+    f.check_camera()
+    assert len(calls) == 1  # só tentou calibrar uma vez, não em toda correção
 
 
 # ---------------------------------------------------------------- setar o spawn

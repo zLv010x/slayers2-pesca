@@ -24,6 +24,11 @@ DEFAULTS: dict = {
     "compass_lock": True,
     "compass_tolerance_px": 6,
     "auto_camera": True,  # tenta girar a câmera sozinha antes de pausar esperando a pessoa
+    # ganho medido pelo teste de sensibilidade (px de arrasto por px de bússola); None =
+    # nunca testado, a câmera automática começa no chute (3.0) até medir sozinha ou você
+    # apertar "Testar sensibilidade da câmera" (aba Configurar)
+    "camera_gain": None,
+    "camera_gain_measured_at": None,
     "ground_pickup": True,
     "discord": {
         "webhook_url": "",
