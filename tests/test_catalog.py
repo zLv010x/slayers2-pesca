@@ -160,7 +160,7 @@ def test_leitura_errada_vira_o_item_certo(known, read, name):
 
 
 # Nomes que NÃO podem virar outro item (itens diferentes de verdade ou parecidos demais)
-DIFFERENT = ["OuwFwesh", "Mythic Refinement Ore", "Core", "Big Zebra Fish", "Crustadon Shell",
+DIFFERENT = ["OuwFwesh", "Core", "Big Zebra Fish", "Crustadon Shell",
              "Lost Mask", "Golden Fishing Rod"]
 
 
@@ -438,8 +438,8 @@ def test_pedaco_de_varios_nomes_nunca_vira_item(known):
 def test_item_novo_com_nome_limpo_entra_na_hora(known):
     rec = known.record("Shotgun Schematic", "legendary", IMG)
     assert rec.accepted and rec.first_time and rec.name == "Shotgun Schematic"
-    rec = known.record("Mythic Refinement Ore", "mythic", IMG)
-    assert rec.accepted and rec.first_time and rec.name == "Mythic Refinement Ore"
+    rec = known.record("Golden Anchor", "mythic", IMG)
+    assert rec.accepted and rec.first_time and rec.name == "Golden Anchor"
 
 
 def test_nome_desconfiado_so_entra_depois_de_visto_3_vezes(known, dirs):
@@ -480,18 +480,18 @@ def test_arrumar_junta_leituras_erradas_de_hoje_e_tira_o_lixo(known, dirs):
                        ("zMythic Refinement Ore", 1, {"rare": 1}), ("Clovurn Fish", 1, {"rare": 1})])
     changes = dict(Catalog(*dirs).tidy())
     assert changes == {"ra Fish": "Zebra Fish", "xg•.ollec": None, "C r LI stado": "Crustadon",
-                       "4cpilk Thread": None, "Thread": None}
+                       "4cpilk Thread": None, "Thread": None,
+                       "zMythic Refinement Ore": "Refinement Ore"}  # usuário 25/09: é o mesmo item
     # item novo de verdade fica; leitura torta com cara de nome limpo não dá para saber: fica
     assert {i["name"] for i in _index(local)} == {"Zebra Fish", "Crustadon", "Shotgun Schematic",
-                                                  "zMythic Refinement Ore", "Clovurn Fish"}
+                                                  "Refinement Ore", "Clovurn Fish"}
 
 
 def test_item_novo_com_sujeira_minuscula_grudada_entra_com_o_nome_limpo(known):
-    # 24/09 21:23: "zMythic Refinement Ore" (item novo de verdade) entrou com o "z" do ícone
-    rec = known.record("zMythic Refinement Ore", "mythic", IMG)
-    assert rec.accepted and rec.first_time and rec.name == "Mythic Refinement Ore"
-    assert known.resolve("zMythic Refinement Ore") == "Mythic Refinement Ore"
-    assert known.resolve("Mythic Refinement Ore") == "Mythic Refinement Ore"
+    # sujeira minúscula do ícone grudada no começo de um item novo de verdade
+    rec = known.record("zGolden Anchor", "mythic", IMG)
+    assert rec.accepted and rec.first_time and rec.name == "Golden Anchor"
+    assert known.resolve("zGolden Anchor") == "Golden Anchor"
 
 
 def test_leitura_cortada_nao_perde_letras_na_limpeza(known):
@@ -504,3 +504,14 @@ def test_leitura_cortada_nao_perde_letras_na_limpeza(known):
 def test_nome_com_cara_de_leitura_torta_espera_confirmar(dirs, read):
     """Apóstrofo no meio da palavra e MAIÚSCULAS seguidas não são como os nomes do jogo."""
     assert not Catalog(*dirs).record(read, "rare", IMG).accepted
+
+
+
+def test_mythic_refinement_ore_e_o_refinement_ore():
+    """Usuário 25/09: "zMythic Refinement Ore" e "Refinement Ore" são o mesmo item."""
+    from pathlib import Path
+    repo = Path(__file__).resolve().parent.parent / "catalogo"
+    cat = Catalog(repo, repo.with_name("sem_local_no_teste"))
+    assert cat.resolve("zMythic Refinement Ore") == "Refinement Ore"
+    assert cat.resolve("Mythic Refinement Ore") == "Refinement Ore"
+    assert cat.resolve("Legendary Krathulon") == "Krathulon"

@@ -246,3 +246,22 @@ def test_modo_parsec_cada_leitura_e_clique_do_relog_fica_escondido_so_na_hora(mo
     actions.click(1, 1)
     assert log == [("rect", []), ("grab", ["in"]), ("click", ["in", "out", "in"])]
     assert entered == ["in", "out", "in", "out"]
+
+
+
+def test_tela_de_carregamento_na_pesca_clica_skip_e_volta_sem_precisar_do_relog(monkeypatch):
+    """25/09: a macro ficou "não consegui equipar a vara" com o jogo carregando. Carregar não é
+    cair do jogo: funciona até com o auto relog desligado."""
+    screens = iter(["loading", "loading", "normal", "normal", "normal"])
+    clicks = []
+    monkeypatch.setattr(relog_bridge.relog, "classify", lambda img, cfg=None: (
+        relog.Screen(kind="game_loading", skip_pos=(5, 5)) if next(screens, "normal") == "loading"
+        else relog.Screen(kind="unknown")))
+    monkeypatch.setattr(relog_bridge.screen, "click_at", lambda x, y: clicks.append((x, y)) or True)
+    clock = [0.0]
+    f = SimpleNamespace(cfg=_cfg(enabled=False), rect=lambda: Rect(0, 0, 10, 10),
+                        grabber=SimpleNamespace(grab=lambda r: "img"),
+                        sleep=lambda s: clock.__setitem__(0, clock[0] + max(s, 1.0)), _notify=lambda *a, **k: None)
+    monkeypatch.setattr(relog_bridge, "_now", lambda: clock[0])
+    assert relog_bridge.handle(f, "img") is True
+    assert clicks  # clicou no Skip

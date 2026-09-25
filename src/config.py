@@ -59,6 +59,7 @@ DEFAULTS: dict = {
         # foi F1/botão/fechar), tenta de novo depois disso. 0 desliga.
         "auto_restart_wait_min": 5,
         "max_restarts_per_hour": 3,
+        "after_relog_failed_casts": 10,
     },
     "tracking": {
         "task_fps": 30.0,
@@ -92,11 +93,15 @@ DEFAULTS: dict = {
         "total_timeout_sec": 600.0,
         "settle_sec": 8.0,
         "max_per_hour": 4,
-        "no_reconnect_codes": [264],   # 264 = a conta entrou de outro PC: reconectar derrubaria
+        "no_reconnect_codes": [264],
+        "loading_timeout_sec": 300.0,  # tela "Skip loading!": cada PC demora um tanto   # 264 = a conta entrou de outro PC: reconectar derrubaria
     },
     "ui": {"always_on_top": True, "show_recent": True, "minimize_on_start": True,
            "overlay": True, "overlay_pos": None,
-           "show_in_capture": False},  # aparecer no Parsec/OBS (a macro se apaga dos próprios prints)
+           "show_in_capture": False,
+           # filtro do overlay: o que aparece e quais raridades
+           "overlay_show": {"time": True, "fish": True, "values": True, "items": True, "baits": True},
+           "overlay_rarities": ["mythic", "legendary", "epic", "rare", "common"]},  # aparecer no Parsec/OBS (a macro se apaga dos próprios prints)
     "diagnostic": False,   # log detalhado + prints dos problemas (deixa a macro mais pesada)
     "config_rev": 3,
 }

@@ -53,6 +53,8 @@ ADVANCED_FIELDS = {
         ("max_recoveries", "Problemas seguidos até desistir", "Recuperações seguidas sem pegar peixe antes de parar."),
         ("auto_restart_wait_min", "Reiniciar sozinho após (min)",
          "Se a pesca parar sozinha (não foi F1/botão/fechar), tenta de novo depois desse tempo. 0 desliga."),
+        ("after_relog_failed_casts", "Lançamentos vazios após relog",
+         "Depois de reconectar, tantos lançamentos sem peixe = nasceu longe da água: para e avisa."),
         ("max_restarts_per_hour", "Reinícios por hora (máx.)",
          "Depois de tentar reiniciar sozinha esse tanto de vezes numa hora, só avisa e espera você."),
     ],
@@ -301,6 +303,7 @@ class SetupTab:
                       command=app.reset_overlay).pack(side="right")
         hint(box, "Mostra tempo, peixes, itens e iscas gastas. Arraste para mudar de lugar "
                   "(com a pesca parada; pescando, os cliques passam através dele).")
+        self._build_overlay_filter(box, cfg)
         r = row(box)
         self.in_capture = ctk.CTkSwitch(r, text="Aparecer no Parsec / OBS", command=self._save_in_capture)
         self.in_capture.pack(side="left")
@@ -352,6 +355,42 @@ class SetupTab:
     def _save_overlay(self) -> None:
         self.app.cfg["ui"]["overlay"] = bool(self.overlay_on.get())
         self.app.apply_overlay()
+        self.app.save_soon()
+
+    def _build_overlay_filter(self, box, cfg) -> None:
+        """O que aparece no overlay: partes e raridades (pedido de 25/09)."""
+        ui = cfg["ui"]
+        show = {**{"time": True, "fish": True, "values": True, "items": True, "baits": True},
+                **ui.get("overlay_show", {})}
+        visible = set(ui.get("overlay_rarities", RARITY_ORDER))
+        self.overlay_parts: dict[str, ctk.CTkCheckBox] = {}
+        self.overlay_rar: dict[str, ctk.CTkCheckBox] = {}
+        r = row(box)
+        ctk.CTkLabel(r, text="No overlay:", text_color=MUTED).pack(side="left")
+        for key, text in (("time", "Tempo"), ("fish", "Peixes"), ("values", "Yen"), ("items", "Itens"),
+                          ("baits", "Iscas")):
+            cb = ctk.CTkCheckBox(r, text=text, width=20, checkbox_width=16, checkbox_height=16,
+                                 command=self._save_overlay_filter)
+            cb.pack(side="left", padx=(6, 0))
+            if show.get(key, True):
+                cb.select()
+            self.overlay_parts[key] = cb
+        r = row(box)
+        short = {"legendary": "Legend."}  # a linha inteira precisa caber na janela
+        for rarity in RARITY_ORDER:
+            cb = ctk.CTkCheckBox(r, text=short.get(rarity, webhook.RARITY_LABELS[rarity]), width=20,
+                                 checkbox_width=16,
+                                 checkbox_height=16, text_color=RARITY_HEX[rarity],
+                                 command=self._save_overlay_filter)
+            cb.pack(side="left", padx=(6, 0))
+            if rarity in visible:
+                cb.select()
+            self.overlay_rar[rarity] = cb
+
+    def _save_overlay_filter(self) -> None:
+        ui = self.app.cfg["ui"]
+        ui["overlay_show"] = {k: bool(cb.get()) for k, cb in self.overlay_parts.items()}
+        ui["overlay_rarities"] = [r for r, cb in self.overlay_rar.items() if cb.get()]
         self.app.save_soon()
 
     def _save_in_capture(self) -> None:

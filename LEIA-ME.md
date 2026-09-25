@@ -40,7 +40,8 @@ Macro de pesca automática para o Slayers 2 (Roblox), com aviso no Discord de ca
   e avisa no Discord: entre de novo, volte ao ponto de pesca e aperte F1. Se a conta entrou em
   outro PC (erro 264), nunca reconecta.
 - **Overlay** por cima do jogo com o tempo de macro, o total de cada peixe e item e as iscas gastas.
-  Fica em cima da party; com a pesca parada dá para arrastar. Liga/desliga e "Voltar para a party"
+  Fica em cima da party; com a pesca parada dá para arrastar. O que aparece nele (tempo, peixes, Yen, itens,
+  iscas e quais raridades) se escolhe em **Configurar → Janela**. Liga/desliga e "Voltar para a party"
   em **Configurar → Janela**. Ele não aparece nos prints da macro e, pescando, o clique passa através dele.
 - **Parsec / OBS**: normalmente a janela da macro e o overlay somem de qualquer captura enquanto
   pesca (pelo Parsec parece que minimizou). Ligue **Configurar → Janela → Aparecer no Parsec / OBS**

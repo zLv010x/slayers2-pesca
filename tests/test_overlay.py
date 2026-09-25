@@ -161,3 +161,20 @@ def test_item_sem_raridade_conhecida_vai_por_ultimo_sem_cor():
     lines = overlay.build_lines("1m 00s", Counter({"Coisa Nova": 50, "Coral": 1}), Counter(), rarities=RARITIES)
     rows = [ln for ln in lines if ln.style == "row"]
     assert [r.text for r in rows] == ["Coral", "Coisa Nova"] and rows[1].color is None
+
+
+
+# ---------------------------------------------------------------- filtro do overlay (25/09)
+def test_filtro_esconde_secoes_do_overlay():
+    counts = Counter({"Zebra Fish": 3, "Ore": 1})
+    show = {"time": False, "fish": True, "values": False, "items": False, "baits": False}
+    texts = flat(overlay.build_lines("5m 00s", counts, Counter({"Worm": 2}), prices={"Zebra Fish": 66},
+                                     show=show))
+    assert texts == ["Peixes (3)", "Zebra Fish  3"]  # sem tempo, sem valor, sem itens, sem iscas
+
+
+def test_filtro_por_raridade_no_overlay():
+    counts = Counter({"Zebra Fish": 3, "Krathulon": 1, "Ore": 2})
+    lines = overlay.build_lines("5m 00s", counts, Counter(), rarities=RARITIES | {"Zebra Fish": "rare"},
+                                visible_rarities={"mythic", "legendary"})
+    assert [ln.text for ln in lines if ln.style == "row"] == ["Krathulon", "Ore"]

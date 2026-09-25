@@ -175,3 +175,44 @@ def test_join_private_e_achado_quando_a_legenda_hold_nao_esta_junto(monkeypatch)
 def test_carregando_now_entering_e_reconhecido(shot):
     screen = classify(shot("relog_carregando_now_entering.webp"))
     assert screen.kind == "loading"
+
+
+
+# ---------------------------------------------------------------- "Skip loading!" (25/09)
+def _loading_lines():
+    from ocr import Line
+    return [Line("Loading 85 / 189 Assets..", 700, 770, 130, 10), Line("Skip loading!", 790, 797, 110, 14)]
+
+
+def test_tela_de_carregamento_do_jogo_acha_o_skip(monkeypatch):
+    """Depois do Reconnect o jogo mostra "Loading N / M Assets" e o botão "Skip loading!"."""
+    import numpy as np
+    monkeypatch.setattr(relog.ocr, "read_lines", lambda img, min_height=0: _loading_lines())
+    screen = classify(np.zeros((900, 1600, 3), dtype="uint8"))
+    assert screen.kind == "game_loading"
+    cx, cy = screen.skip_pos
+    assert 790 <= cx <= 900 and 797 <= cy <= 811
+
+
+class _Actions:
+    def __init__(self):
+        self.clicks, self.t = [], 0.0
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+        return True
+
+    def status(self, msg):
+        pass
+
+    def now(self):
+        return self.t
+
+
+def test_relog_clica_no_skip_sem_repetir_toda_hora():
+    r = relog.Relogger({}, _Actions())
+    screen = Screen(kind="game_loading", skip_pos=(845, 804))
+    for t in (0.0, 1.0, 2.0, 6.0):
+        r.actions.t = t
+        assert r._step(screen, None) is None  # continua esperando carregar
+    assert r.actions.clicks == [(845, 804), (845, 804)]  # de novo só depois do intervalo

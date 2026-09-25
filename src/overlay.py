@@ -115,15 +115,29 @@ def _section(title: str, rows: list[tuple[str, int]], max_rows: int,
     return out
 
 
+DEFAULT_SHOW = {"time": True, "fish": True, "values": True, "items": True, "baits": True}
+
+
 def build_lines(elapsed: str, counts: Counter, baits_used: Counter, max_rows: int = MAX_ROWS,
-                prices: dict[str, int] | None = None, rarities: dict[str, str] | None = None) -> list[Line]:
+                prices: dict[str, int] | None = None, rarities: dict[str, str] | None = None,
+                show: dict | None = None, visible_rarities: set[str] | None = None) -> list[Line]:
+    """Linhas do overlay. `show` escolhe as partes (tempo, peixes, valores, itens, iscas) e
+    `visible_rarities` esconde raridades (item de raridade desconhecida sempre aparece)."""
+    show = {**DEFAULT_SHOW, **(show or {})}
+    if visible_rarities is not None and rarities:
+        counts = Counter({n: q for n, q in counts.items()
+                          if rarities.get(n) not in RARITY_ORDER or rarities.get(n) in visible_rarities})
     fish, items = split_counts(counts, rarities)
-    lines = [Line(f"⏱ {elapsed}", "title")]
-    if not fish and not items:
+    lines = [Line(f"⏱ {elapsed}", "title")] if show["time"] else []
+    if not fish and not items and (show["fish"] or show["items"]):
         lines.append(Line("Nada pego ainda", "empty"))
-    lines += _section("Peixes", fish, max_rows, prices, f"Total ({CURRENCY})", rarities)
-    lines += _section("Itens", items, max_rows, prices, rarities=rarities)
-    lines += _section("Iscas gastas", _sorted_rows(baits_used), max_rows)
+    shown_prices = prices if show["values"] else None
+    if show["fish"]:
+        lines += _section("Peixes", fish, max_rows, shown_prices, f"Total ({CURRENCY})", rarities)
+    if show["items"]:
+        lines += _section("Itens", items, max_rows, shown_prices, rarities=rarities)
+    if show["baits"]:
+        lines += _section("Iscas gastas", _sorted_rows(baits_used), max_rows)
     return lines
 
 

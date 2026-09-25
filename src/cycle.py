@@ -151,6 +151,8 @@ class Fisher:
         self.relog_budget = RestartPolicy()  # reconexões na última hora
         self.stop_for_good = False  # parada em que reiniciar sozinho não adianta (menu principal)
         self.after_relog = False    # reconectou e ainda não pegou nenhum peixe desde então
+        self._relog_failed = 0      # lançamentos vazios desde o relog
+        self._cycle_start = time.perf_counter()
         self._last_status = ""
         self._status_cb = cb.status
         cb.status = self._status
@@ -485,6 +487,7 @@ class Fisher:
                             waited = now - (start_deadline - self.t("minigame_start_timeout_sec"))
                             log.info("Peixe mordeu após %.1fs (quadrado %dpx)", waited, game.ball_h)
                             self.cb.status("Minigame!")
+                            self._spend_bait()
                     else:
                         hits = 1 if game is not None else 0
                     last_game = game
@@ -777,7 +780,7 @@ class Fisher:
     def one_cycle(self) -> None:
         self.cycles += 1
         log.debug("---- ciclo %d ----", self.cycles)
-        cycle_start = time.perf_counter()
+        self._cycle_start = time.perf_counter()
         self._set_spawn_if_needed()
         self._maybe_check_baits()
         self.ensure_rod()
@@ -787,10 +790,12 @@ class Fisher:
             self.failed_casts += 1
             limit = int(self.cfg["limits"]["max_failed_casts"])
             self.cb.status(f"Nenhum peixe mordeu ({self.failed_casts}/{limit}). Tentando de novo...")
+            if self.after_relog:
+                self._relog_failed += 1
+                if self._relog_failed >= int(self.cfg["limits"].get("after_relog_failed_casts", 10)):
+                    self._stop_far_from_water()
             if self.failed_casts >= limit:
                 self.failed_casts = 0
-                if self.after_relog:
-                    self._stop_far_from_water()
                 _, img = self.frame()
                 raise Recoverable(f"{limit} lançamentos seguidos sem minigame (caiu na água? vara presa?)", img)
             return
@@ -798,19 +803,23 @@ class Fisher:
         self.collect()
         self._fished_ok = True
         self.after_relog = False
-        if self._baits_on():
-            # o jogo gasta 1 isca a cada mordida resolvida (pegando ou não)
-            spent = self.baits.consume(time.perf_counter() - cycle_start, self.cfg["baits"]["infinite"])
-            if spent:
-                self.session.record_bait(spent)
-            if self.bait_path is not None:
-                self.baits.save(self.bait_path)
-            self._report_bait()
+        self._relog_failed = 0
         if self.cycles % STATS_EVERY_CYCLES == 0:
             self._log_stats()
         # só zera depois que o ciclo inteiro deu certo (senão um erro sempre no mesmo lugar
         # nunca deixa o contador passar de 1 e a macro nunca desiste de verdade)
         self.recoveries = 0
+
+    def _spend_bait(self) -> None:
+        """O minigame começou: o jogo gasta 1 isca exatamente agora (pegando ou não o peixe)."""
+        if not self._baits_on():
+            return
+        spent = self.baits.consume(time.perf_counter() - self._cycle_start, self.cfg["baits"]["infinite"])
+        if spent:
+            self.session.record_bait(spent)
+        if self.bait_path is not None:
+            self.baits.save(self.bait_path)
+        self._report_bait()
 
     def _stop_far_from_water(self) -> None:
         """Reconectou e nenhum lançamento pegou peixe: nasceu longe da água (spawn setado no lugar

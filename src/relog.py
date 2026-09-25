@@ -94,7 +94,7 @@ HOLD_POLL_SEC = 0.1  # intervalo de checagem durante o JOIN segurado
 @dataclass(frozen=True)
 class Screen:
     """O que `classify()` enxergou: tipo da tela + posições úteis (pixels do frame)."""
-    kind: str  # "disconnected" | "main_menu" | "server_select" | "server_card" | "loading" | "unknown"
+    kind: str  # "disconnected" | "main_menu" | "server_select" | "server_card" | "loading" | "game_loading" | "unknown"
     message: str | None = None
     error_code: int | None = None
     reconnect_pos: tuple[int, int] | None = None
@@ -104,6 +104,7 @@ class Screen:
     owner_field_pos: tuple[int, int] | None = None
     join_pos: tuple[int, int] | None = None
     join_private_pos: tuple[int, int] | None = None
+    skip_pos: tuple[int, int] | None = None   # botão "Skip loading!" da tela de carregamento do jogo
 
 
 def _words(text: str) -> set[str]:
@@ -130,6 +131,7 @@ def classify(frame: np.ndarray | None, cfg: dict | None = None) -> Screen:
     return (
         _detect_disconnected(frame, lines)
         or _detect_main_menu(frame)
+        or _detect_game_loading(lines)
         or _detect_loading(lines)
         or _detect_server(frame, lines, cfg.get("map_name", DEFAULTS["map_name"]))
         or Screen(kind="unknown")
@@ -235,6 +237,15 @@ def _detect_main_menu(frame: np.ndarray) -> Screen | None:
     return Screen(kind="main_menu", play_pos=play_pos)
 
 
+def _detect_game_loading(lines: list[ocr.Line]) -> Screen | None:
+    """Carregamento do jogo depois de entrar ("Loading 85 / 189 Assets.." + botão "Skip loading!")."""
+    skip = next((l for l in lines if "skip" in _squash(l.text)), None)
+    assets = any("assets" in _squash(l.text) for l in lines)
+    if skip is None and not assets:
+        return None
+    return Screen(kind="game_loading", skip_pos=_center(skip) if skip is not None else None)
+
+
 def _detect_loading(lines: list[ocr.Line]) -> Screen | None:
     # em janela pequena "Now Entering..." sai torto (ex.: "owentermg", "owentenng")
     for l in lines:
@@ -336,6 +347,7 @@ class Relogger:
             "server_select": self._on_server_select,
             "server_card": self._on_server_card,
             "loading": self._on_loading,
+            "game_loading": self._on_game_loading,
         }
         return handlers.get(screen.kind, self._on_unknown)(screen, frame)
 
@@ -370,6 +382,12 @@ class Relogger:
 
     def _on_loading(self, screen: Screen, frame: np.ndarray) -> None:
         self.actions.status("Carregando...")
+
+    def _on_game_loading(self, screen: Screen, frame: np.ndarray) -> None:
+        """Carregando o jogo: clica em "Skip loading!" (de novo só depois do intervalo) e espera."""
+        self.actions.status("Carregando o jogo: clicando em Skip loading.")
+        if screen.skip_pos:
+            self._throttled_click("game_loading", *screen.skip_pos)
 
     def _on_unknown(self, screen: Screen, frame: np.ndarray) -> RelogResult | None:
         if self.actions.in_game(frame):

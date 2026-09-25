@@ -1090,9 +1090,11 @@ def test_depois_do_relog_sem_peixe_para_e_avisa_do_spawn():
     f = FakeFisher([True])
     _only_fails_casting(f)
     f.after_relog = True
-    limit = int(f.cfg["limits"]["max_failed_casts"])
-    for _ in range(limit - 1):
-        f.one_cycle()
+    for _ in range(9):
+        try:
+            f.one_cycle()
+        except cycle.Recoverable:
+            pass
     with pytest.raises(cycle.StopRun) as exc:
         f.one_cycle()
     assert "spawn" in str(exc.value) and f.stop_for_good
@@ -1141,3 +1143,34 @@ def test_nome_que_nao_existe_nao_vai_para_janela_historico_nem_discord(tmp_path,
     assert [r.name for r in sent] == ["Clown Fish"]
     assert shown == [["Clown Fish"]]
     assert f.session.catches == 1
+
+
+
+def test_depois_do_relog_espera_10_lancamentos_vazios():
+    """Pedido de 25/09: 10 lançamentos sem peixe depois do relog (não 5) antes de parar."""
+    f = FakeFisher([True])
+    _only_fails_casting(f)
+    f.after_relog = True
+    recoveries = 0
+    for _ in range(9):
+        try:
+            f.one_cycle()
+        except cycle.Recoverable:
+            recoveries += 1
+    assert recoveries == 1  # nos 5 primeiros vazios ainda tenta se recuperar
+    with pytest.raises(cycle.StopRun):
+        f.one_cycle()
+
+
+def test_isca_gasta_quando_o_minigame_comeca():
+    """Pedido de 25/09: no jogo a isca é gasta quando o minigame começa (pegando ou não)."""
+    f = FakeFisher([True])
+    spent = []
+    f._baits_on = lambda: True
+    f.baits = type("B", (), {"consume": lambda self, sec, inf: spent.append(1) or "Fish Head",
+                             "save": lambda self, p: None, "summary": lambda self, inf: "",
+                             "warning": False})()
+    f.bait_path = None
+    f.session = type("S", (), {"record_bait": lambda self, n: spent.append(n)})()
+    f._spend_bait()
+    assert spent == [1, "Fish Head"]

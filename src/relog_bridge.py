@@ -130,7 +130,7 @@ def not_ready_reason(cfg: dict) -> str | None:
 def lost_game_screen(img: np.ndarray | None, cfg: dict | None = None) -> relog.Screen | None:
     """Menu principal ou dialog "Disconnected" de verdade (com botão) na tela?"""
     s = relog.classify(img, cfg)
-    if s.kind == "main_menu":
+    if s.kind in ("main_menu", "game_loading"):
         return s
     if s.kind == "disconnected" and (s.reconnect_pos or s.leave_pos):
         return s  # sem botão é texto solto (ex.: alguém escreveu "disconnected" no chat)
@@ -175,6 +175,45 @@ def _clean_frame(f, img: np.ndarray | None) -> np.ndarray | None:
         return img
 
 
+DEFAULT_LOADING_TIMEOUT_SEC = 300.0
+LOADING_POLL_SEC = 1.0
+
+
+def _now() -> float:
+    return time.perf_counter()
+
+
+def _skip_loading(f) -> bool:
+    """Tela de carregamento do jogo (25/09: a pesca ficou "não consegui equipar a vara" com o
+    jogo carregando). Clica em "Skip loading!" e espera o jogo aparecer por `settle_sec`; cada
+    PC demora um tanto, então o limite é folgado e configurável (relog.loading_timeout_sec)."""
+    r = f.cfg.get("relog", {})
+    timeout = float(r.get("loading_timeout_sec", DEFAULT_LOADING_TIMEOUT_SEC))
+    settle = float(r.get("settle_sec", relog.DEFAULTS["settle_sec"]))
+    actions = RelogActions(f)
+    log.info("Tela de carregamento do jogo: clicando em Skip loading e esperando o jogo.")
+    start, last_click, normal_since = _now(), None, None
+    while _now() - start < timeout:
+        _, _, frame = actions.grab()
+        s = relog.classify(frame, r)
+        now = _now()
+        if s.kind == "game_loading":
+            normal_since = None
+            if s.skip_pos and (last_click is None or now - last_click >= relog.CLICK_COOLDOWN_SEC):
+                actions.click(*s.skip_pos)
+                last_click = now
+        elif s.kind == "unknown":  # jogo normal de novo
+            normal_since = normal_since if normal_since is not None else now
+            if now - normal_since >= settle:
+                log.info("Carregou: voltando a pescar.")
+                return True
+        else:
+            return False  # caiu para outra tela (menu/desconectado): a próxima conferência cuida
+        f.sleep(LOADING_POLL_SEC)
+    log.warning("O jogo ficou carregando mais de %.0fs.", timeout)
+    return False
+
+
 def _handle(f, img: np.ndarray | None) -> bool:
     try:
         s = lost_game_screen(img, f.cfg.get("relog"))
@@ -183,6 +222,8 @@ def _handle(f, img: np.ndarray | None) -> bool:
         return False
     if s is None:
         return False
+    if s.kind == "game_loading":
+        return _skip_loading(f)  # carregar não é cair do jogo: não depende do auto relog
     what = _describe(s)
     logbook.save_evidence(img, "caiu do jogo")
     r = f.cfg.get("relog", {})
@@ -206,6 +247,7 @@ def _reconnect(f, what: str) -> bool:
         f._notify("✅ Reconectado: voltando a pescar.", ping=False)
         f.recoveries = 0
         f.after_relog = True  # se nem assim pegar peixe, o spawn está longe da água
+        f._relog_failed = 0
         return True
     if result.reason == "codigo_sem_reconexao":
         _stop_for_good(f, f"{what}; esse código não reconecta sozinho")

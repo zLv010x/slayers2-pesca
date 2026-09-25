@@ -58,6 +58,12 @@ class RelogTab:
         r = row(box)
         ctk.CTkLabel(r, text="Reconexões por hora (máx.)").pack(side="left")
         self.app.number_entry(r, self.app.cfg["relog"], "max_per_hour", width=50, cast=int).pack(side="right")
+        for key, text in (("step_timeout_sec", "Espera máx. por passo (s)"),
+                          ("loading_timeout_sec", "Espera máx. carregando o jogo (s)")):
+            r = row(box)
+            ctk.CTkLabel(r, text=text).pack(side="left")
+            self.app.number_entry(r, self.app.cfg["relog"], key, width=60).pack(side="right")
+        hint(box, "Cada PC demora um tanto para carregar: aumente se o seu for mais lento.")
 
     def _build_spawn(self, scroll) -> None:
         box = section(scroll, "Gamepass Set Spawn")

@@ -110,6 +110,15 @@ def normalize(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+RARITY_PREFIX = re.compile(r"^\W*\w?(mythic|legendary|epic|rare|common)\s+", re.IGNORECASE)
+
+
+def strip_rarity(name: str) -> str:
+    """ "zMythic Refinement Ore" -> "Refinement Ore": o aviso às vezes vem com a raridade na
+    frente (usuário 25/09: é o mesmo item)."""
+    return RARITY_PREFIX.sub("", name)
+
+
 def fix_ocr(name: str) -> str:
     for pattern, repl in OCR_FIXES:
         name = pattern.sub(repl, name)
@@ -262,7 +271,8 @@ class Catalog:
         """Chave do item para esse nome lido e como achou: "exact", "fixed" (trocas do OCR
         desfeitas), "alias", "shape" (mesmo esqueleto), "affix" (sujeira antes do nome), "cut"
         (começo cortado), "fuzzy" ou "fuzzy_relaxed"."""
-        keys = [k for k in dict.fromkeys((normalize(name), normalize(fix_ocr(name)))) if k]
+        keys = [k for k in dict.fromkeys((normalize(name), normalize(fix_ocr(name)),
+                                          normalize(strip_rarity(name)))) if k]
         if not keys:
             return None, None
         entries = {k: e for k, e in self._entries().items() if k != exclude}
